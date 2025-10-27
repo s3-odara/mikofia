@@ -4,6 +4,7 @@ use std::path::Path;
 pub struct Node {
     pub path: String,
     pub existence: Existence,
+    pub kind: NodeKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -12,6 +13,14 @@ pub enum Existence {
     #[default]
     Optional,
     Absent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NodeKind {
+    File,
+    Directory,
+    #[default]
+    Any,
 }
 
 #[derive(Debug)]
@@ -34,10 +43,13 @@ pub fn check(nodes: &[Node], root: &Path) -> Vec<Violation> {
                         path: node.path.clone(),
                         message: format!("Required item not found: {}", node.path),
                     });
+                    continue;
                 }
             }
             Existence::Optional => {
-                // No violation for optional items
+                if !exists {
+                    continue;
+                }
             }
             Existence::Absent => {
                 if exists {
@@ -46,6 +58,29 @@ pub fn check(nodes: &[Node], root: &Path) -> Vec<Violation> {
                         message: format!("Item must not exist: {}", node.path),
                     });
                 }
+                continue;
+            }
+        }
+
+        match node.kind {
+            NodeKind::File => {
+                if !full_path.is_file() {
+                    violations.push(Violation {
+                        path: node.path.clone(),
+                        message: format!("Expected file, but found directory: {}", node.path),
+                    });
+                }
+            }
+            NodeKind::Directory => {
+                if !full_path.is_dir() {
+                    violations.push(Violation {
+                        path: node.path.clone(),
+                        message: format!("Expected directory, but found file: {}", node.path),
+                    });
+                }
+            }
+            NodeKind::Any => {
+                //
             }
         }
     }
@@ -70,6 +105,7 @@ mod tests {
         let nodes = vec![Node {
             path: "Cargo.toml".to_string(),
             existence: Existence::Required,
+            kind: NodeKind::Any,
         }];
         let violations = check(&nodes, &PathBuf::from("."));
         assert!(violations.is_empty());

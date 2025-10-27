@@ -1,6 +1,6 @@
 use std::env;
 
-use mikofia::{Existence, Node};
+use mikofia::{Existence, Node, NodeKind};
 
 fn main() {
     let current_dir = env::current_dir().unwrap();
@@ -9,14 +9,22 @@ fn main() {
         Node {
             path: "Cargo.toml".to_string(),
             existence: Existence::Required,
+            kind: NodeKind::File,
+        },
+        Node {
+            path: "mikofia".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::Directory,
         },
         Node {
             path: "README.md".to_string(),
             existence: Existence::Optional,
+            kind: NodeKind::File,
         },
         Node {
             path: "temp".to_string(),
             existence: Existence::Absent,
+            kind: NodeKind::Any,
         },
     ];
 
