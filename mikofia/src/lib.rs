@@ -131,4 +131,92 @@ mod tests {
         assert_eq!(config.nodes[0].path, "test.txt");
         assert_eq!(config.nodes[0].existence, Existence::Required);
     }
+
+    #[test]
+    fn test_is_glob_pattern_basic_wildcards() {
+        // Basic glob patterns
+        let node = Node {
+            path: "src/*.rs".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::File,
+            children: vec![],
+            strict: None,
+        };
+        assert!(node.is_glob_pattern());
+
+        let node = Node {
+            path: "test?.txt".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::File,
+            children: vec![],
+            strict: None,
+        };
+        assert!(node.is_glob_pattern());
+
+        let node = Node {
+            path: "file[123].txt".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::File,
+            children: vec![],
+            strict: None,
+        };
+        assert!(node.is_glob_pattern());
+    }
+
+    #[test]
+    fn test_is_glob_pattern_brace_expansion() {
+        // Brace expansion pattern
+        let node = Node {
+            path: "src/{foo,bar}.rs".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::File,
+            children: vec![],
+            strict: None,
+        };
+        assert!(node.is_glob_pattern());
+    }
+
+    #[test]
+    fn test_is_glob_pattern_negation() {
+        // Negation pattern
+        let node = Node {
+            path: "!*.tmp".to_string(),
+            existence: Existence::Absent,
+            kind: NodeKind::File,
+            children: vec![],
+            strict: None,
+        };
+        assert!(node.is_glob_pattern());
+    }
+
+    #[test]
+    fn test_is_glob_pattern_literal_paths() {
+        // Literal paths should not be detected as globs
+        let node = Node {
+            path: "src/main.rs".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::File,
+            children: vec![],
+            strict: None,
+        };
+        assert!(!node.is_glob_pattern());
+
+        let node = Node {
+            path: "Cargo.toml".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::File,
+            children: vec![],
+            strict: None,
+        };
+        assert!(!node.is_glob_pattern());
+
+        let node = Node {
+            path: "path/to/file.txt".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::File,
+            children: vec![],
+            strict: None,
+        };
+        assert!(!node.is_glob_pattern());
+    }
 }

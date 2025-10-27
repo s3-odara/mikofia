@@ -29,9 +29,22 @@ impl Node {
         self.strict.unwrap_or_else(|| !self.children.is_empty())
     }
 
-    /// Check if path contains glob pattern characters
+    /// Check whether the path uses glob syntax understood by `globset`
     pub fn is_glob_pattern(&self) -> bool {
-        self.path.contains('*') || self.path.contains('?') || self.path.contains('[')
+        use globset::{GlobBuilder, escape};
+
+        // If the pattern fails to parse as a glob, treat it as a literal.
+        let Ok(parsed) = GlobBuilder::new(&self.path).build() else {
+            return false;
+        };
+
+        // Compare against the same text escaped into a purely literal glob.
+        let literal_pattern = escape(&self.path);
+        let Ok(literal) = GlobBuilder::new(&literal_pattern).build() else {
+            return false;
+        };
+
+        parsed.regex() != literal.regex()
     }
 }
 
