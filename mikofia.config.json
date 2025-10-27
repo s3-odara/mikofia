@@ -8,12 +8,38 @@
     {
       "path": "mikofia",
       "existence": "required",
-      "kind": "directory"
+      "kind": "directory",
+      "strict": true,
+      "children": [
+        {
+          "path": "Cargo.toml",
+          "existence": "required",
+          "kind": "file"
+        },
+        {
+          "path": "src",
+          "existence": "required",
+          "kind": "directory"
+        }
+      ]
     },
     {
       "path": "mikofia-cli",
       "existence": "required",
-      "kind": "directory"
+      "kind": "directory",
+      "strict": true,
+      "children": [
+        {
+          "path": "Cargo.toml",
+          "existence": "required",
+          "kind": "file"
+        },
+        {
+          "path": "src",
+          "existence": "required",
+          "kind": "directory"
+        }
+      ]
     },
     {
       "path": "README.md",
