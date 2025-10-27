@@ -1,0 +1,9 @@
+{
+  "nodes": [
+    {
+      "path": "nonexistent-file.txt",
+      "existence": "required",
+      "type": "file"
+    }
+  ]
+}

@@ -1,13 +1,21 @@
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::io;
 use std::path::Path;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Node {
     pub path: String,
+
+    #[serde(default)]
     pub existence: Existence,
+
+    #[serde(default)]
     pub kind: NodeKind,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Existence {
     Required,
     #[default]
@@ -15,12 +23,28 @@ pub enum Existence {
     Absent,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum NodeKind {
     File,
     Directory,
     #[default]
     Any,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Config {
+    pub nodes: Vec<Node>,
+}
+
+impl Config {
+    /// Load configuration from a JSON file
+    pub fn from_file(path: &Path) -> io::Result<Self> {
+        let content = fs::read_to_string(path)?;
+        let config: Config = serde_json::from_str(&content)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        Ok(config)
+    }
 }
 
 #[derive(Debug)]

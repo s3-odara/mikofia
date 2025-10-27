@@ -1,0 +1,28 @@
+{
+  "nodes": [
+    {
+      "path": "Cargo.toml",
+      "existence": "required",
+      "kind": "file"
+    },
+    {
+      "path": "mikofia",
+      "existence": "required",
+      "kind": "directory"
+    },
+    {
+      "path": "mikofia-cli",
+      "existence": "required",
+      "kind": "directory"
+    },
+    {
+      "path": "README.md",
+      "existence": "optional",
+      "kind": "file"
+    },
+    {
+      "path": "temp",
+      "existence": "absent"
+    }
+  ]
+}
