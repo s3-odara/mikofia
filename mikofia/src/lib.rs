@@ -30,62 +30,52 @@ pub struct Violation {
 }
 
 pub fn check(nodes: &[Node], root: &Path) -> Vec<Violation> {
-    let mut violations = Vec::new();
+    nodes
+        .iter()
+        .flat_map(|node| check_node(node, root))
+        .collect()
+}
 
-    for node in nodes {
-        let full_path = root.join(&node.path);
-        let exists = full_path.exists();
+fn check_node(node: &Node, root: &Path) -> Vec<Violation> {
+    let full_path = root.join(&node.path);
+    let exists = full_path.exists();
 
-        match node.existence {
-            Existence::Required => {
-                if !exists {
-                    violations.push(Violation {
-                        path: node.path.clone(),
-                        message: format!("Required item not found: {}", node.path),
-                    });
-                    continue;
-                }
-            }
-            Existence::Optional => {
-                if !exists {
-                    continue;
-                }
-            }
-            Existence::Absent => {
-                if exists {
-                    violations.push(Violation {
-                        path: node.path.clone(),
-                        message: format!("Item must not exist: {}", node.path),
-                    });
-                }
-                continue;
-            }
-        }
-
-        match node.kind {
-            NodeKind::File => {
-                if !full_path.is_file() {
-                    violations.push(Violation {
-                        path: node.path.clone(),
-                        message: format!("Expected file, but found directory: {}", node.path),
-                    });
-                }
-            }
-            NodeKind::Directory => {
-                if !full_path.is_dir() {
-                    violations.push(Violation {
-                        path: node.path.clone(),
-                        message: format!("Expected directory, but found file: {}", node.path),
-                    });
-                }
-            }
-            NodeKind::Any => {
-                //
-            }
-        }
+    // Check existence first
+    let existence_violation = check_existence(node, exists);
+    if existence_violation.is_some() || !exists {
+        return existence_violation.into_iter().collect();
     }
 
-    violations
+    // Check kind only if item exists and passes existence check
+    check_kind(node, &full_path).into_iter().collect()
+}
+
+fn check_existence(node: &Node, exists: bool) -> Option<Violation> {
+    match node.existence {
+        Existence::Required if !exists => Some(Violation {
+            path: node.path.clone(),
+            message: format!("Required item not found: {}", node.path),
+        }),
+        Existence::Absent if exists => Some(Violation {
+            path: node.path.clone(),
+            message: format!("Item must not exist: {}", node.path),
+        }),
+        _ => None,
+    }
+}
+
+fn check_kind(node: &Node, full_path: &Path) -> Option<Violation> {
+    match node.kind {
+        NodeKind::File if !full_path.is_file() => Some(Violation {
+            path: node.path.clone(),
+            message: format!("Expected file, but found directory: {}", node.path),
+        }),
+        NodeKind::Directory if !full_path.is_dir() => Some(Violation {
+            path: node.path.clone(),
+            message: format!("Expected directory, but found file: {}", node.path),
+        }),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
