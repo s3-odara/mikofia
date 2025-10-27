@@ -1,0 +1,7 @@
+[package]
+name = "mikofia-cli"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mikofia = { path = "../mikofia" }
