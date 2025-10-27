@@ -27,6 +27,11 @@ impl Node {
     pub fn is_strict(&self) -> bool {
         self.strict.unwrap_or_else(|| !self.children.is_empty())
     }
+
+    /// Check if path contains glob pattern characters
+    pub fn is_glob_pattern(&self) -> bool {
+        self.path.contains('*') || self.path.contains('?') || self.path.contains('[')
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]

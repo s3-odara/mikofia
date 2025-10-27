@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::Path;
 
+use crate::glob;
 use crate::pipeline::{CheckPipeline, KindChecked};
 use crate::types::{Node, Violation};
 
@@ -13,6 +14,12 @@ pub fn check(nodes: &[Node], root: &Path) -> Vec<Violation> {
 }
 
 fn check_node(node: &Node, root: &Path) -> Vec<Violation> {
+    // Check if path is a glob pattern
+    if node.is_glob_pattern() {
+        return check_glob_node(node, root);
+    }
+
+    // Regular path checking
     let full_path = root.join(&node.path);
     let exists = full_path.exists();
 
@@ -21,6 +28,59 @@ fn check_node(node: &Node, root: &Path) -> Vec<Violation> {
         .check_kind()
         .check_directory_with(check_directory_violations)
         .violations()
+}
+
+fn check_glob_node(node: &Node, root: &Path) -> Vec<Violation> {
+    // Expand glob pattern
+    let matched_paths = match glob::expand_glob(&node.path, root) {
+        Ok(paths) => paths,
+        Err(e) => {
+            return vec![Violation {
+                path: node.path.clone(),
+                message: e,
+            }];
+        }
+    };
+
+    // If required and no matches, that's a violation
+    if matched_paths.is_empty() {
+        if matches!(node.existence, crate::types::Existence::Required) {
+            return vec![Violation {
+                path: node.path.clone(),
+                message: format!("No files match required pattern: {}", node.path),
+            }];
+        }
+        return vec![];
+    }
+
+    // Check each matched path
+    matched_paths
+        .into_iter()
+        .flat_map(|path| {
+            let exists = path.exists();
+            let relative_path = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_path_buf();
+
+            CheckPipeline::new(node, path, exists)
+                .check_existence()
+                .check_kind()
+                .check_directory_with(check_directory_violations)
+                .violations()
+                .into_iter()
+                .map(move |mut v| {
+                    // Update violation path to include both pattern and actual path
+                    v.path = format!(
+                        "{} (matched: {})",
+                        node.path,
+                        relative_path.display()
+                    );
+                    v
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 /// Extension trait to add directory checking to KindChecked state
@@ -76,17 +136,32 @@ fn check_strict(node: &Node, dir_path: &Path) -> Vec<Violation> {
         Err(_) => return vec![], // Ignore read errors
     };
 
-    // Get defined children paths
-    let defined_items: Vec<&str> = node
+    // Build matchers for children (both literal paths and glob patterns)
+    let matchers: Vec<_> = node
         .children
         .iter()
-        .map(|child| child.path.as_str())
+        .filter_map(|child| {
+            if child.is_glob_pattern() {
+                // Compile glob pattern
+                globset::Glob::new(&child.path)
+                    .ok()
+                    .map(|g| (child.path.as_str(), g.compile_matcher()))
+            } else {
+                // For literal paths, create a simple exact matcher using glob
+                globset::Glob::new(&child.path)
+                    .ok()
+                    .map(|g| (child.path.as_str(), g.compile_matcher()))
+            }
+        })
         .collect();
 
     // Find unlisted items
     actual_items
         .into_iter()
-        .filter(|item| !defined_items.contains(&item.as_str()))
+        .filter(|item| {
+            // Check if item matches any defined pattern
+            !matchers.iter().any(|(_, matcher)| matcher.is_match(item))
+        })
         .map(|item| Violation {
             path: format!("{}/{}", node.path, item),
             message: format!("Unlisted child item: {}", item),
