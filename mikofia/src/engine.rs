@@ -1,38 +1,43 @@
-use std::fs;
 use std::path::Path;
 
+use crate::fs::{FileSystem, RealFileSystem};
 use crate::glob;
 use crate::pipeline::{CheckPipeline, KindChecked};
 use crate::types::{Node, Violation};
 
 /// Main entry point for validation
 pub fn check(nodes: &[Node], root: &Path) -> Vec<Violation> {
+    check_with_fs(nodes, root, &RealFileSystem)
+}
+
+/// Main entry point for validation with custom filesystem
+pub fn check_with_fs<F: FileSystem>(nodes: &[Node], root: &Path, fs: &F) -> Vec<Violation> {
     nodes
         .iter()
-        .flat_map(|node| check_node(node, root))
+        .flat_map(|node| check_node(node, root, fs))
         .collect()
 }
 
-fn check_node(node: &Node, root: &Path) -> Vec<Violation> {
+fn check_node<F: FileSystem>(node: &Node, root: &Path, fs: &F) -> Vec<Violation> {
     // Check if path is a glob pattern
     if node.is_glob_pattern() {
-        return check_glob_node(node, root);
+        return check_glob_node(node, root, fs);
     }
 
     // Regular path checking
     let full_path = root.join(&node.path);
-    let exists = full_path.exists();
+    let exists = fs.exists(&full_path);
 
     CheckPipeline::new(node, full_path, exists)
         .check_existence()
-        .check_kind()
-        .check_directory_with(check_directory_violations)
+        .check_kind(fs)
+        .check_directory_with(|n, p| check_directory_violations(n, p, fs))
         .violations()
 }
 
-fn check_glob_node(node: &Node, root: &Path) -> Vec<Violation> {
+fn check_glob_node<F: FileSystem>(node: &Node, root: &Path, fs: &F) -> Vec<Violation> {
     // Expand glob pattern
-    let matched_paths = match glob::expand_glob(&node.path, root) {
+    let matched_paths = match glob::expand_glob(&node.path, root, fs) {
         Ok(paths) => paths,
         Err(e) => {
             return vec![Violation {
@@ -57,7 +62,7 @@ fn check_glob_node(node: &Node, root: &Path) -> Vec<Violation> {
     matched_paths
         .into_iter()
         .flat_map(|path| {
-            let exists = path.exists();
+            let exists = fs.exists(&path);
             let relative_path = path
                 .strip_prefix(root)
                 .unwrap_or(&path)
@@ -65,8 +70,8 @@ fn check_glob_node(node: &Node, root: &Path) -> Vec<Violation> {
 
             CheckPipeline::new(node, path, exists)
                 .check_existence()
-                .check_kind()
-                .check_directory_with(check_directory_violations)
+                .check_kind(fs)
+                .check_directory_with(|n, p| check_directory_violations(n, p, fs))
                 .violations()
                 .into_iter()
                 .map(move |mut v| {
@@ -95,7 +100,7 @@ impl<'a> DirectoryCheck<'a> for CheckPipeline<'a, KindChecked> {
     where
         F: FnOnce(&Node, &Path) -> Vec<Violation>,
     {
-        if !self.should_continue || !self.path.is_dir() {
+        if !self.should_continue {
             return self;
         }
 
@@ -105,9 +110,9 @@ impl<'a> DirectoryCheck<'a> for CheckPipeline<'a, KindChecked> {
     }
 }
 
-fn check_directory_violations(node: &Node, dir_path: &Path) -> Vec<Violation> {
-    let strict_violations = check_strict(node, dir_path);
-    let children_violations = check_children(node, dir_path);
+fn check_directory_violations<F: FileSystem>(node: &Node, dir_path: &Path, fs: &F) -> Vec<Violation> {
+    let strict_violations = check_strict(node, dir_path, fs);
+    let children_violations = check_children(node, dir_path, fs);
 
     strict_violations
         .into_iter()
@@ -115,24 +120,21 @@ fn check_directory_violations(node: &Node, dir_path: &Path) -> Vec<Violation> {
         .collect()
 }
 
-fn check_children(node: &Node, dir_path: &Path) -> Vec<Violation> {
+fn check_children<F: FileSystem>(node: &Node, dir_path: &Path, fs: &F) -> Vec<Violation> {
     node.children
         .iter()
-        .flat_map(|child| check_node(child, dir_path))
+        .flat_map(|child| check_node(child, dir_path, fs))
         .collect()
 }
 
-fn check_strict(node: &Node, dir_path: &Path) -> Vec<Violation> {
+fn check_strict<F: FileSystem>(node: &Node, dir_path: &Path, fs: &F) -> Vec<Violation> {
     if !node.is_strict() {
         return vec![];
     }
 
     // Get actual items in directory
-    let actual_items: Vec<String> = match fs::read_dir(dir_path) {
-        Ok(entries) => entries
-            .filter_map(|e| e.ok())
-            .filter_map(|e| e.file_name().into_string().ok())
-            .collect(),
+    let actual_items: Vec<String> = match fs.read_dir(dir_path) {
+        Ok(items) => items,
         Err(_) => return vec![], // Ignore read errors
     };
 

@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::io;
 use std::path::Path;
+
+use crate::fs::{FileSystem, RealFileSystem};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Node {
@@ -60,7 +61,12 @@ pub struct Config {
 impl Config {
     /// Load configuration from a JSON file
     pub fn from_file(path: &Path) -> io::Result<Self> {
-        let content = fs::read_to_string(path)?;
+        Self::from_file_with_fs(path, &RealFileSystem)
+    }
+
+    /// Load configuration from a JSON file with custom filesystem
+    pub fn from_file_with_fs<F: FileSystem>(path: &Path, fs: &F) -> io::Result<Self> {
+        let content = fs.read_to_string(path)?;
         let config: Config = serde_json::from_str(&content)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         Ok(config)

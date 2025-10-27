@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 use std::path::PathBuf;
 
+use crate::fs::FileSystem;
 use crate::types::{Existence, Node, NodeKind, Violation};
 
 /// Type state markers for compile-time step ordering
@@ -76,7 +77,7 @@ impl<'a> CheckPipeline<'a, Initial> {
 
 impl<'a> CheckPipeline<'a, ExistenceChecked> {
     /// Check kind (file/directory)
-    pub(crate) fn check_kind(mut self) -> CheckPipeline<'a, KindChecked> {
+    pub(crate) fn check_kind<F: FileSystem>(mut self, fs: &F) -> CheckPipeline<'a, KindChecked> {
         if !self.should_continue {
             return CheckPipeline {
                 node: self.node,
@@ -88,12 +89,15 @@ impl<'a> CheckPipeline<'a, ExistenceChecked> {
             };
         }
 
+        let is_file = !fs.is_dir(&self.path);
+        let is_dir = fs.is_dir(&self.path);
+
         let violation = match self.node.kind {
-            NodeKind::File if !self.path.is_file() => Some(Violation {
+            NodeKind::File if !is_file => Some(Violation {
                 path: self.node.path.clone(),
                 message: format!("Expected file, but found directory: {}", self.node.path),
             }),
-            NodeKind::Directory if !self.path.is_dir() => Some(Violation {
+            NodeKind::Directory if !is_dir => Some(Violation {
                 path: self.node.path.clone(),
                 message: format!("Expected directory, but found file: {}", self.node.path),
             }),
