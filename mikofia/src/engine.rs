@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use crate::fs::{FileSystem, RealFileSystem};
 use crate::glob;
 use crate::pipeline::CheckPipeline;
-use crate::types::{Node, Violation};
+use crate::types::{
+    EvaluationContext, Node, ParentInfo, RuleHandle, RuleResult, SiblingInfo, Violation,
+};
 
 /// Main entry point for validation
 pub fn check(nodes: &[Node], root: &Path) -> Vec<Violation> {
@@ -28,11 +30,19 @@ fn check_node<F: FileSystem>(node: &Node, root: &Path, fs: &F) -> Vec<Violation>
     let full_path = root.join(&node.path);
     let exists = fs.exists(&full_path);
 
-    CheckPipeline::new(node, full_path, exists)
+    let mut violations = CheckPipeline::new(node, full_path.clone(), exists)
         .check_existence()
         .check_kind(fs)
         .check_directory_with(|n, p| check_directory_violations(n, p, fs))
-        .violations()
+        .violations();
+
+    // Execute custom rules if the path exists
+    if exists {
+        let rule_violations = execute_rules(node, &full_path, fs);
+        violations.extend(rule_violations);
+    }
+
+    violations
 }
 
 fn check_glob_node<F: FileSystem>(node: &Node, root: &Path, fs: &F) -> Vec<Violation> {
@@ -178,4 +188,72 @@ fn normalize_join(root: &Path, pattern: &str) -> PathBuf {
     } else {
         root.join(pattern)
     }
+}
+
+/// Build evaluation context for a file or directory
+fn build_evaluation_context<F: FileSystem>(path: &Path, fs: &F) -> EvaluationContext {
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+
+    let extension = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_string());
+
+    let parent = path.parent().and_then(|parent_path| {
+        parent_path.file_name().and_then(|parent_name| {
+            parent_name.to_str().map(|name_str| ParentInfo {
+                path: to_string_path(parent_path),
+                name: name_str.to_string(),
+            })
+        })
+    });
+
+    let siblings = if let Some(parent_path) = path.parent() {
+        fs.read_dir(parent_path)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|sibling_name| sibling_name != &name)
+            .map(|sibling_name| {
+                let sibling_path = parent_path.join(&sibling_name);
+                SiblingInfo {
+                    name: sibling_name,
+                    is_file: !fs.is_dir(&sibling_path),
+                    is_directory: fs.is_dir(&sibling_path),
+                }
+            })
+            .collect()
+    } else {
+        vec![]
+    };
+
+    EvaluationContext {
+        path: to_string_path(path),
+        name,
+        extension,
+        parent,
+        siblings,
+    }
+}
+
+/// Execute custom rules on a path
+fn execute_rules<F: FileSystem>(node: &Node, path: &Path, fs: &F) -> Vec<Violation> {
+    if node.rules.is_empty() {
+        return vec![];
+    }
+
+    let ctx = build_evaluation_context(path, fs);
+
+    node.rules
+        .iter()
+        .filter_map(|rule| match rule {
+            RuleHandle::Native(native_rule) => match native_rule.check(&ctx) {
+                RuleResult::Fail { violation } => Some(violation),
+                RuleResult::Pass | RuleResult::Skip { .. } => None,
+            },
+        })
+        .collect()
 }

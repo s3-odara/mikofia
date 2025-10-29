@@ -43,7 +43,6 @@ mod tests {
             kind: NodeKind::Any,
             children: vec![],
             strict: None,
-            rules: vec![],
         }];
         let violations = check(&nodes, &PathBuf::from("."));
         assert!(violations.is_empty());
@@ -66,7 +65,6 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
-            rules: vec![],
         }];
 
         let violations = check_with_fs(&nodes, &root, &mock_fs);
@@ -87,7 +85,6 @@ mod tests {
             kind: NodeKind::Any,
             children: vec![],
             strict: None,
-            rules: vec![],
         }];
 
         let violations = check_with_fs(&nodes, &root, &mock_fs);
@@ -117,7 +114,6 @@ mod tests {
                     kind: NodeKind::File,
                     children: vec![],
                     strict: None,
-            rules: vec![],
                 },
                 Node {
                     path: "lib.rs".to_string(),
@@ -125,11 +121,9 @@ mod tests {
                     kind: NodeKind::File,
                     children: vec![],
                     strict: None,
-            rules: vec![],
                 },
             ],
             strict: Some(true),
-            rules: vec![],
         }];
 
         let violations = check_with_fs(&nodes, &root, &mock_fs);
@@ -164,7 +158,6 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
-            rules: vec![],
         };
         assert!(node.is_glob_pattern());
 
@@ -174,7 +167,6 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
-            rules: vec![],
         };
         assert!(node.is_glob_pattern());
 
@@ -184,7 +176,6 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
-            rules: vec![],
         };
         assert!(node.is_glob_pattern());
     }
@@ -198,7 +189,6 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
-            rules: vec![],
         };
         assert!(node.is_glob_pattern());
     }
@@ -212,7 +202,6 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
-            rules: vec![],
         };
         assert!(node.is_glob_pattern());
     }
@@ -226,7 +215,6 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
-            rules: vec![],
         };
         assert!(!node.is_glob_pattern());
 
@@ -236,7 +224,6 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
-            rules: vec![],
         };
         assert!(!node.is_glob_pattern());
 
@@ -246,7 +233,6 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
-            rules: vec![],
         };
         assert!(!node.is_glob_pattern());
     }
@@ -263,7 +249,6 @@ mod tests {
             kind: NodeKind::Any,
             children: vec![],
             strict: None,
-            rules: vec![],
         }];
 
         let violations = check_with_fs(&nodes, &root, &mock_fs);
@@ -284,7 +269,6 @@ mod tests {
             kind: NodeKind::Directory,
             children: vec![],
             strict: None,
-            rules: vec![],
         }];
 
         let violations = check_with_fs(&nodes, &root, &mock_fs);
@@ -308,7 +292,6 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
-            rules: vec![],
         }];
 
         let violations = check_with_fs(&nodes, &root, &mock_fs);
@@ -339,7 +322,6 @@ mod tests {
                     kind: NodeKind::File,
                     children: vec![],
                     strict: None,
-            rules: vec![],
                 },
                 Node {
                     path: "dev.toml".to_string(),
@@ -347,11 +329,9 @@ mod tests {
                     kind: NodeKind::File,
                     children: vec![],
                     strict: None,
-            rules: vec![],
                 },
             ],
             strict: Some(true),
-            rules: vec![],
         }];
 
         let violations = check_with_fs(&nodes, &root, &mock_fs);
@@ -376,10 +356,8 @@ mod tests {
                 kind: NodeKind::File,
                 children: vec![],
                 strict: None,
-            rules: vec![],
             }],
             strict: Some(true),
-            rules: vec![],
         }];
 
         let violations = check_with_fs(&nodes, &root, &mock_fs);
@@ -411,10 +389,8 @@ mod tests {
                 kind: NodeKind::File,
                 children: vec![],
                 strict: None,
-            rules: vec![],
             }],
             strict: Some(true),
-            rules: vec![],
         }];
 
         assert!(
@@ -446,7 +422,6 @@ mod tests {
                     kind: NodeKind::File,
                     children: vec![],
                     strict: None,
-            rules: vec![],
                 },
                 Node {
                     path: "*.toml".to_string(),
@@ -454,11 +429,9 @@ mod tests {
                     kind: NodeKind::File,
                     children: vec![],
                     strict: None,
-            rules: vec![],
                 },
             ],
             strict: Some(true),
-            rules: vec![],
         }];
 
         let violations = check_with_fs(&nodes, &root, &mock_fs);
@@ -486,7 +459,6 @@ mod tests {
             kind: NodeKind::Directory,
             children: vec![],
             strict: None,
-            rules: vec![],
         }];
 
         let violations = check_with_fs(&nodes, &root, &mock_fs);
@@ -515,7 +487,6 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
-            rules: vec![],
         }];
 
         let violations = check_with_fs(&nodes, &root, &mock_fs);
@@ -544,7 +515,6 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
-            rules: vec![],
         }];
 
         let violations = check_with_fs(&nodes, &root, &mock_fs);
@@ -612,7 +582,6 @@ mod tests {
             kind: NodeKind::Directory,
             children: vec![],
             strict: Some(true),
-            rules: vec![],
         }];
 
         let violations = check_with_fs(&nodes, &root, &fs);
