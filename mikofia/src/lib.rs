@@ -17,7 +17,9 @@ pub use fs::mock::MockFileSystem;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+    use std::cell::Cell;
+    use std::io;
+    use std::path::{Path, PathBuf};
 
     fn mock_root() -> PathBuf {
         PathBuf::from("/project")
@@ -497,5 +499,90 @@ mod tests {
             violations[0].message,
             "No files match required pattern: logs/*.log"
         );
+    }
+
+    #[test]
+    fn test_optional_glob_missing_produces_no_violation() {
+        let root = mock_root();
+        let mock_fs = MockFileSystem::new();
+
+        let nodes = vec![Node {
+            path: "logs/*.log".to_string(),
+            existence: Existence::Optional,
+            kind: NodeKind::File,
+            children: vec![],
+            strict: None,
+        }];
+
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        assert!(violations.is_empty());
+    }
+
+    struct ReadDirErrorFs {
+        root: PathBuf,
+        read_dir_called: Cell<bool>,
+    }
+
+    impl ReadDirErrorFs {
+        fn new(root: PathBuf) -> Self {
+            Self {
+                root,
+                read_dir_called: Cell::new(false),
+            }
+        }
+    }
+
+    impl FileSystem for ReadDirErrorFs {
+        fn exists(&self, path: &Path) -> bool {
+            path == self.root || path == self.root.join("config")
+        }
+
+        fn is_dir(&self, path: &Path) -> bool {
+            path == self.root.join("config")
+        }
+
+        fn read_dir(&self, path: &Path) -> io::Result<Vec<String>> {
+            if path == self.root.join("config") {
+                self.read_dir_called.set(true);
+                Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "simulated read_dir failure",
+                ))
+            } else {
+                Err(io::Error::new(io::ErrorKind::NotFound, "not found"))
+            }
+        }
+
+        fn read_to_string(&self, _path: &Path) -> io::Result<String> {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "read_to_string not supported",
+            ))
+        }
+
+        fn walk_dir<F>(&self, _path: &Path, _predicate: F) -> io::Result<Vec<PathBuf>>
+        where
+            F: Fn(&Path) -> bool,
+        {
+            Ok(vec![])
+        }
+    }
+
+    #[test]
+    fn test_strict_directory_ignores_read_dir_errors() {
+        let root = mock_root();
+        let fs = ReadDirErrorFs::new(root.clone());
+
+        let nodes = vec![Node {
+            path: "config".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::Directory,
+            children: vec![],
+            strict: Some(true),
+        }];
+
+        let violations = check_with_fs(&nodes, &root, &fs);
+        assert!(violations.is_empty(), "unexpected violations: {violations:?}");
+        assert!(fs.read_dir_called.get());
     }
 }
