@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::fs::{FileSystem, RealFileSystem};
 use crate::glob;
-use crate::pipeline::{CheckPipeline, KindChecked};
+use crate::pipeline::CheckPipeline;
 use crate::types::{Node, Violation};
 
 /// Main entry point for validation
@@ -79,28 +79,6 @@ fn check_glob_node<F: FileSystem>(node: &Node, root: &Path, fs: &F) -> Vec<Viola
                 .collect::<Vec<_>>()
         })
         .collect()
-}
-
-/// Extension trait to add directory checking to KindChecked state
-trait DirectoryCheck<'a> {
-    fn check_directory_with<F>(self, f: F) -> CheckPipeline<'a, KindChecked>
-    where
-        F: FnOnce(&Node, &Path) -> Vec<Violation>;
-}
-
-impl<'a> DirectoryCheck<'a> for CheckPipeline<'a, KindChecked> {
-    fn check_directory_with<F>(mut self, f: F) -> Self
-    where
-        F: FnOnce(&Node, &Path) -> Vec<Violation>,
-    {
-        if !self.should_continue {
-            return self;
-        }
-
-        let new_violations = f(self.node, &self.path);
-        self.violations.extend(new_violations);
-        self
-    }
 }
 
 fn check_directory_violations<F: FileSystem>(node: &Node, dir_path: &Path, fs: &F) -> Vec<Violation> {
