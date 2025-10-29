@@ -279,4 +279,65 @@ mod tests {
             "Expected file, but found directory: src"
         );
     }
+
+    #[test]
+    fn test_mock_fs_strict_directory_allows_listed_children() {
+        let mut mock_fs = MockFileSystem::new();
+        mock_fs.add_dir("./config");
+        mock_fs.add_file("./config/app.toml", "[settings]");
+        mock_fs.add_file("./config/dev.toml", "[dev]");
+
+        let nodes = vec![Node {
+            path: "config".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::Directory,
+            children: vec![
+                Node {
+                    path: "app.toml".to_string(),
+                    existence: Existence::Required,
+                    kind: NodeKind::File,
+                    children: vec![],
+                    strict: None,
+                },
+                Node {
+                    path: "dev.toml".to_string(),
+                    existence: Existence::Optional,
+                    kind: NodeKind::File,
+                    children: vec![],
+                    strict: None,
+                },
+            ],
+            strict: Some(true),
+        }];
+
+        let violations = check_with_fs(&nodes, &PathBuf::from("."), &mock_fs);
+        assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn test_mock_fs_strict_directory_reports_unlisted_child() {
+        let mut mock_fs = MockFileSystem::new();
+        mock_fs.add_dir("./config");
+        mock_fs.add_file("./config/app.toml", "[settings]");
+        mock_fs.add_file("./config/secret.toml", "[secret]");
+
+        let nodes = vec![Node {
+            path: "config".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::Directory,
+            children: vec![Node {
+                path: "app.toml".to_string(),
+                existence: Existence::Required,
+                kind: NodeKind::File,
+                children: vec![],
+                strict: None,
+            }],
+            strict: Some(true),
+        }];
+
+        let violations = check_with_fs(&nodes, &PathBuf::from("."), &mock_fs);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].message, "Unlisted child item: secret.toml");
+        assert_eq!(violations[0].path, "config/secret.toml");
+    }
 }
