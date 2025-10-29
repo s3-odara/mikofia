@@ -6,3 +6,8 @@ edition.workspace = true
 [dependencies]
 clap = { version = "4.5.50", features = ["derive"] }
 mikofia = { path = "../mikofia" }
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
