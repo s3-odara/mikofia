@@ -4,9 +4,10 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-deno_core = "0.363"
-deno_runtime = "0.228"
+deno_core = "0.350"
+deno_runtime = "0.215"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+anyhow = "1.0"
 mikofia = { path = "../mikofia" }
