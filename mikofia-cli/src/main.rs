@@ -1,15 +1,37 @@
-use std::env;
+use clap::Parser;
+use std::path::PathBuf;
 use std::process;
 
-fn main() {
-    let current_dir = env::current_dir().unwrap();
+#[derive(Parser, Debug)]
+#[command(name = "mikofia")]
+#[command(version, about = "A file structure validation tool", long_about = None)]
+struct Args {
+    /// Path to the configuration file
+    #[arg(short, long, default_value = "mikofia.config.json")]
+    config: PathBuf,
 
-    // Look for config file
-    let config_path = current_dir.join("mikofia.config.json");
+    /// Directory to check (defaults to current directory)
+    #[arg(short, long)]
+    dir: Option<PathBuf>,
+}
+
+fn main() {
+    let args = Args::parse();
+
+    let current_dir = std::env::current_dir().unwrap();
+
+    // Determine the directory to check
+    let check_dir = args.dir.unwrap_or_else(|| current_dir.clone());
+
+    let config_path = if args.config.is_absolute() {
+        args.config
+    } else {
+        check_dir.join(&args.config)
+    };
 
     if !config_path.exists() {
-        eprintln!("❌ Config file not found: mikofia.config.json");
-        eprintln!("   Create a config file in the current directory.");
+        eprintln!("❌ Config file not found: {}", config_path.display());
+        eprintln!("   Create a config file or specify a different path with --config");
         process::exit(2);
     }
 
@@ -23,9 +45,11 @@ fn main() {
     };
 
     println!("🚀 Running mikofia check...\n");
+    println!("📁 Directory: {}", check_dir.display());
+    println!("⚙️  Config: {}\n", config_path.display());
 
     // Run validation
-    let violations = mikofia::check(&config.nodes, &current_dir);
+    let violations = mikofia::check(&config.nodes, &check_dir);
 
     if violations.is_empty() {
         println!("✅ All checks passed!");
