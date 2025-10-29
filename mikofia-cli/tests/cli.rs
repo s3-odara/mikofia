@@ -24,8 +24,7 @@ fn write_file(dir: &TempDir, path: &str) {
 fn fails_when_config_missing() {
     let temp = TempDir::new().expect("create temp dir");
 
-    Command::cargo_bin("mikofia-cli")
-        .expect("binary exists")
+    Command::new(assert_cmd::cargo::cargo_bin!("mikofia-cli"))
         .current_dir(temp.path())
         .assert()
         .failure()
@@ -42,8 +41,7 @@ fn reads_config_from_dir_flag() {
     );
     write_file(&temp, "Cargo.toml");
 
-    Command::cargo_bin("mikofia-cli")
-        .expect("binary exists")
+    Command::new(assert_cmd::cargo::cargo_bin!("mikofia-cli"))
         .arg("--dir")
         .arg(temp.path())
         .assert()
@@ -63,8 +61,7 @@ fn reads_config_from_custom_path() {
     .expect("write config");
     write_file(&temp, "Cargo.toml");
 
-    Command::cargo_bin("mikofia-cli")
-        .expect("binary exists")
+    Command::new(assert_cmd::cargo::cargo_bin!("mikofia-cli"))
         .arg("--dir")
         .arg(temp.path())
         .arg("--config")
