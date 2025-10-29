@@ -138,22 +138,32 @@ fn check_strict<F: FileSystem>(node: &Node, dir_path: &Path, fs: &F) -> Vec<Viol
         Err(_) => return vec![], // Ignore read errors
     };
 
-    // Build matchers for children (both literal paths and glob patterns)
-    let matchers: Vec<_> = node
+    // Split child nodes into literal names and compiled glob matchers using iterator transforms.
+    let literal_children: Vec<String> = node
         .children
         .iter()
+        .filter(|child| !child.is_glob_pattern())
+        .map(|child| {
+            std::path::Path::new(&child.path)
+                .components()
+                .find_map(|component| match component {
+                    std::path::Component::Normal(name) => {
+                        Some(name.to_string_lossy().into_owned())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| child.path.clone())
+        })
+        .collect();
+
+    let glob_matchers: Vec<_> = node
+        .children
+        .iter()
+        .filter(|child| child.is_glob_pattern())
         .filter_map(|child| {
-            if child.is_glob_pattern() {
-                // Compile glob pattern
-                globset::Glob::new(&child.path)
-                    .ok()
-                    .map(|g| (child.path.as_str(), g.compile_matcher()))
-            } else {
-                // For literal paths, create a simple exact matcher using glob
-                globset::Glob::new(&child.path)
-                    .ok()
-                    .map(|g| (child.path.as_str(), g.compile_matcher()))
-            }
+            globset::Glob::new(&child.path)
+                .ok()
+                .map(|glob| (child.path.as_str(), glob.compile_matcher()))
         })
         .collect();
 
@@ -162,7 +172,14 @@ fn check_strict<F: FileSystem>(node: &Node, dir_path: &Path, fs: &F) -> Vec<Viol
         .into_iter()
         .filter(|item| {
             // Check if item matches any defined pattern
-            !matchers.iter().any(|(_, matcher)| matcher.is_match(item))
+            let literal_match = literal_children.iter().any(|literal| literal == item);
+            if literal_match {
+                return false;
+            }
+
+            !glob_matchers
+                .iter()
+                .any(|(_, matcher)| matcher.is_match(item))
         })
         .map(|item| Violation {
             path: format!("{}/{}", node.path, item),

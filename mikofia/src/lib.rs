@@ -340,4 +340,70 @@ mod tests {
         assert_eq!(violations[0].message, "Unlisted child item: secret.toml");
         assert_eq!(violations[0].path, "config/secret.toml");
     }
+
+    #[test]
+    fn test_mock_fs_strict_directory_literal_with_relative_prefix() {
+        let mut mock_fs = MockFileSystem::new();
+        mock_fs.add_dir("./config");
+        mock_fs.add_file("./config/app.toml", "[settings]");
+
+        let nodes = vec![Node {
+            path: "config".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::Directory,
+            children: vec![Node {
+                path: "./app.toml".to_string(),
+                existence: Existence::Required,
+                kind: NodeKind::File,
+                children: vec![],
+                strict: None,
+            }],
+            strict: Some(true),
+        }];
+
+        assert!(
+            !nodes[0].children[0].is_glob_pattern(),
+            "./app.toml should be treated as literal for this test"
+        );
+
+        let violations = check_with_fs(&nodes, &PathBuf::from("."), &mock_fs);
+        assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn test_mock_fs_strict_directory_mixed_literal_and_glob() {
+        let mut mock_fs = MockFileSystem::new();
+        mock_fs.add_dir("./config");
+        mock_fs.add_file("./config/app.toml", "[settings]");
+        mock_fs.add_file("./config/dev.toml", "[dev]");
+        mock_fs.add_file("./config/app.yaml", "foo: bar");
+
+        let nodes = vec![Node {
+            path: "config".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::Directory,
+            children: vec![
+                Node {
+                    path: "app.toml".to_string(),
+                    existence: Existence::Required,
+                    kind: NodeKind::File,
+                    children: vec![],
+                    strict: None,
+                },
+                Node {
+                    path: "*.toml".to_string(),
+                    existence: Existence::Optional,
+                    kind: NodeKind::File,
+                    children: vec![],
+                    strict: None,
+                },
+            ],
+            strict: Some(true),
+        }];
+
+        let violations = check_with_fs(&nodes, &PathBuf::from("."), &mock_fs);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].message, "Unlisted child item: app.yaml");
+        assert_eq!(violations[0].path, "config/app.yaml");
+    }
 }
