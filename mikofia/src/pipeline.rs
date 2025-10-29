@@ -47,11 +47,11 @@ impl<'a> CheckPipeline<'a, Initial> {
 
         let violation = match self.node.existence {
             Existence::Required if !self.exists => Some(Violation {
-                path: self.node.path.clone(),
+                path: self.path.to_string_lossy().into_owned(),
                 message: format!("Required item not found: {}", self.node.path),
             }),
             Existence::Absent if self.exists => Some(Violation {
-                path: self.node.path.clone(),
+                path: self.path.to_string_lossy().into_owned(),
                 message: format!("Item must not exist: {}", self.node.path),
             }),
             _ => None,
@@ -94,11 +94,11 @@ impl<'a> CheckPipeline<'a, ExistenceChecked> {
 
         let violation = match self.node.kind {
             NodeKind::File if !is_file => Some(Violation {
-                path: self.node.path.clone(),
+                path: self.path.to_string_lossy().into_owned(),
                 message: format!("Expected file, but found directory: {}", self.node.path),
             }),
             NodeKind::Directory if !is_dir => Some(Violation {
-                path: self.node.path.clone(),
+                path: self.path.to_string_lossy().into_owned(),
                 message: format!("Expected directory, but found file: {}", self.node.path),
             }),
             _ => None,

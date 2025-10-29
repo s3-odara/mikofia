@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::fs::{FileSystem, RealFileSystem};
 use crate::glob;
@@ -41,7 +41,7 @@ fn check_glob_node<F: FileSystem>(node: &Node, root: &Path, fs: &F) -> Vec<Viola
         Ok(paths) => paths,
         Err(e) => {
             return vec![Violation {
-                path: node.path.clone(),
+                path: absolute_pattern(root, &node.path),
                 message: e,
             }];
         }
@@ -51,7 +51,7 @@ fn check_glob_node<F: FileSystem>(node: &Node, root: &Path, fs: &F) -> Vec<Viola
     if matched_paths.is_empty() {
         if matches!(node.existence, crate::types::Existence::Required) {
             return vec![Violation {
-                path: node.path.clone(),
+                path: absolute_pattern(root, &node.path),
                 message: format!("No files match required pattern: {}", node.path),
             }];
         }
@@ -63,24 +63,17 @@ fn check_glob_node<F: FileSystem>(node: &Node, root: &Path, fs: &F) -> Vec<Viola
         .into_iter()
         .flat_map(|path| {
             let exists = fs.exists(&path);
-            let relative_path = path
-                .strip_prefix(root)
-                .unwrap_or(&path)
-                .to_path_buf();
+            let display_path = to_string_path(&path);
 
-            CheckPipeline::new(node, path, exists)
+            CheckPipeline::new(node, path.clone(), exists)
                 .check_existence()
                 .check_kind(fs)
                 .check_directory_with(|n, p| check_directory_violations(n, p, fs))
                 .violations()
                 .into_iter()
                 .map(move |mut v| {
-                    // Update violation path to include both pattern and actual path
-                    v.path = format!(
-                        "{} (matched: {})",
-                        node.path,
-                        relative_path.display()
-                    );
+                    v.path = display_path.clone();
+                    // Keep message as-is; it already references the pattern when relevant.
                     v
                 })
                 .collect::<Vec<_>>()
@@ -182,8 +175,24 @@ fn check_strict<F: FileSystem>(node: &Node, dir_path: &Path, fs: &F) -> Vec<Viol
                 .any(|(_, matcher)| matcher.is_match(item))
         })
         .map(|item| Violation {
-            path: format!("{}/{}", node.path, item),
+            path: to_string_path(&dir_path.join(&item)),
             message: format!("Unlisted child item: {}", item),
         })
         .collect()
+}
+
+fn to_string_path(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+fn absolute_pattern(root: &Path, pattern: &str) -> String {
+    to_string_path(&normalize_join(root, pattern))
+}
+
+fn normalize_join(root: &Path, pattern: &str) -> PathBuf {
+    if root == Path::new("") {
+        PathBuf::from(pattern)
+    } else {
+        root.join(pattern)
+    }
 }

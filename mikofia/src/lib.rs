@@ -17,6 +17,10 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    fn mock_root() -> PathBuf {
+        PathBuf::from("/project")
+    }
+
     #[test]
     fn test_empty_nodes() {
         let nodes = vec![];
@@ -44,8 +48,9 @@ mod tests {
 
     #[test]
     fn test_mock_fs_required_file_exists() {
+        let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
-        mock_fs.add_file("./test.txt", "content");
+        mock_fs.add_file(root.join("test.txt"), "content");
 
         let nodes = vec![Node {
             path: "test.txt".to_string(),
@@ -55,7 +60,7 @@ mod tests {
             strict: None,
         }];
 
-        let violations = check_with_fs(&nodes, &PathBuf::from("."), &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
         if !violations.is_empty() {
             eprintln!("Violations: {:?}", violations);
         }
@@ -65,6 +70,7 @@ mod tests {
     #[test]
     fn test_mock_fs_required_file_missing() {
         let mock_fs = MockFileSystem::new();
+        let root = mock_root();
 
         let nodes = vec![Node {
             path: "missing.txt".to_string(),
@@ -74,17 +80,21 @@ mod tests {
             strict: None,
         }];
 
-        let violations = check_with_fs(&nodes, &PathBuf::from("."), &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations[0].path, "missing.txt");
+        assert_eq!(
+            violations[0].path,
+            root.join("missing.txt").to_string_lossy().into_owned()
+        );
     }
 
     #[test]
     fn test_mock_fs_directory_with_children() {
+        let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
-        mock_fs.add_dir("./src");
-        mock_fs.add_file("./src/main.rs", "fn main() {}");
-        mock_fs.add_file("./src/lib.rs", "pub fn test() {}");
+        mock_fs.add_dir(root.join("src"));
+        mock_fs.add_file(root.join("src/main.rs"), "fn main() {}");
+        mock_fs.add_file(root.join("src/lib.rs"), "pub fn test() {}");
 
         let nodes = vec![Node {
             path: "src".to_string(),
@@ -109,7 +119,7 @@ mod tests {
             strict: Some(true),
         }];
 
-        let violations = check_with_fs(&nodes, &PathBuf::from("."), &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
         if !violations.is_empty() {
             eprintln!("Violations: {:?}", violations);
         }
@@ -222,8 +232,9 @@ mod tests {
 
     #[test]
     fn test_mock_fs_absent_violation() {
+        let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
-        mock_fs.add_file("./temp.log", "data");
+        mock_fs.add_file(root.join("temp.log"), "data");
 
         let nodes = vec![Node {
             path: "temp.log".to_string(),
@@ -233,15 +244,16 @@ mod tests {
             strict: None,
         }];
 
-        let violations = check_with_fs(&nodes, &PathBuf::from("."), &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].message, "Item must not exist: temp.log");
     }
 
     #[test]
     fn test_mock_fs_expected_directory_but_found_file() {
+        let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
-        mock_fs.add_file("./config", "{}");
+        mock_fs.add_file(root.join("config"), "{}");
 
         let nodes = vec![Node {
             path: "config".to_string(),
@@ -251,7 +263,7 @@ mod tests {
             strict: None,
         }];
 
-        let violations = check_with_fs(&nodes, &PathBuf::from("."), &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
         assert_eq!(violations.len(), 1);
         assert_eq!(
             violations[0].message,
@@ -261,8 +273,9 @@ mod tests {
 
     #[test]
     fn test_mock_fs_expected_file_but_found_directory() {
+        let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
-        mock_fs.add_dir("./src");
+        mock_fs.add_dir(root.join("src"));
 
         let nodes = vec![Node {
             path: "src".to_string(),
@@ -272,7 +285,7 @@ mod tests {
             strict: None,
         }];
 
-        let violations = check_with_fs(&nodes, &PathBuf::from("."), &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
         assert_eq!(violations.len(), 1);
         assert_eq!(
             violations[0].message,
@@ -282,10 +295,11 @@ mod tests {
 
     #[test]
     fn test_mock_fs_strict_directory_allows_listed_children() {
+        let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
-        mock_fs.add_dir("./config");
-        mock_fs.add_file("./config/app.toml", "[settings]");
-        mock_fs.add_file("./config/dev.toml", "[dev]");
+        mock_fs.add_dir(root.join("config"));
+        mock_fs.add_file(root.join("config/app.toml"), "[settings]");
+        mock_fs.add_file(root.join("config/dev.toml"), "[dev]");
 
         let nodes = vec![Node {
             path: "config".to_string(),
@@ -310,16 +324,17 @@ mod tests {
             strict: Some(true),
         }];
 
-        let violations = check_with_fs(&nodes, &PathBuf::from("."), &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
         assert!(violations.is_empty());
     }
 
     #[test]
     fn test_mock_fs_strict_directory_reports_unlisted_child() {
+        let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
-        mock_fs.add_dir("./config");
-        mock_fs.add_file("./config/app.toml", "[settings]");
-        mock_fs.add_file("./config/secret.toml", "[secret]");
+        mock_fs.add_dir(root.join("config"));
+        mock_fs.add_file(root.join("config/app.toml"), "[settings]");
+        mock_fs.add_file(root.join("config/secret.toml"), "[secret]");
 
         let nodes = vec![Node {
             path: "config".to_string(),
@@ -335,17 +350,23 @@ mod tests {
             strict: Some(true),
         }];
 
-        let violations = check_with_fs(&nodes, &PathBuf::from("."), &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].message, "Unlisted child item: secret.toml");
-        assert_eq!(violations[0].path, "config/secret.toml");
+        assert_eq!(
+            violations[0].path,
+            root.join("config/secret.toml")
+                .to_string_lossy()
+                .into_owned()
+        );
     }
 
     #[test]
     fn test_mock_fs_strict_directory_literal_with_relative_prefix() {
+        let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
-        mock_fs.add_dir("./config");
-        mock_fs.add_file("./config/app.toml", "[settings]");
+        mock_fs.add_dir(root.join("config"));
+        mock_fs.add_file(root.join("config/app.toml"), "[settings]");
 
         let nodes = vec![Node {
             path: "config".to_string(),
@@ -366,17 +387,18 @@ mod tests {
             "./app.toml should be treated as literal for this test"
         );
 
-        let violations = check_with_fs(&nodes, &PathBuf::from("."), &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
         assert!(violations.is_empty());
     }
 
     #[test]
     fn test_mock_fs_strict_directory_mixed_literal_and_glob() {
+        let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
-        mock_fs.add_dir("./config");
-        mock_fs.add_file("./config/app.toml", "[settings]");
-        mock_fs.add_file("./config/dev.toml", "[dev]");
-        mock_fs.add_file("./config/app.yaml", "foo: bar");
+        mock_fs.add_dir(root.join("config"));
+        mock_fs.add_file(root.join("config/app.toml"), "[settings]");
+        mock_fs.add_file(root.join("config/dev.toml"), "[dev]");
+        mock_fs.add_file(root.join("config/app.yaml"), "foo: bar");
 
         let nodes = vec![Node {
             path: "config".to_string(),
@@ -401,9 +423,70 @@ mod tests {
             strict: Some(true),
         }];
 
-        let violations = check_with_fs(&nodes, &PathBuf::from("."), &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].message, "Unlisted child item: app.yaml");
-        assert_eq!(violations[0].path, "config/app.yaml");
+        assert_eq!(
+            violations[0].path,
+            root.join("config/app.yaml")
+                .to_string_lossy()
+                .into_owned()
+        );
+    }
+
+    #[test]
+    fn test_mock_fs_glob_violation_uses_absolute_path() {
+        let root = mock_root();
+        let mut mock_fs = MockFileSystem::new();
+        mock_fs.add_dir(root.join("config"));
+        mock_fs.add_file(root.join("config/app.toml"), "[settings]");
+
+        let nodes = vec![Node {
+            path: "config/*.toml".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::Directory,
+            children: vec![],
+            strict: None,
+        }];
+
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(
+            violations[0].path,
+            root.join("config/app.toml")
+                .to_string_lossy()
+                .into_owned()
+        );
+        assert_eq!(
+            violations[0].message,
+            "Expected directory, but found file: config/*.toml"
+        );
+    }
+
+    #[test]
+    fn test_mock_fs_glob_missing_uses_absolute_pattern() {
+        let root = mock_root();
+        let mock_fs = MockFileSystem::new();
+
+        let nodes = vec![Node {
+            path: "logs/*.log".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::File,
+            children: vec![],
+            strict: None,
+        }];
+
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(
+            violations[0].path,
+            root.join("logs/*.log")
+                .to_string_lossy()
+                .into_owned()
+        );
+        assert_eq!(
+            violations[0].message,
+            "No files match required pattern: logs/*.log"
+        );
     }
 }
