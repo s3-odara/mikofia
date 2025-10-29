@@ -57,7 +57,8 @@ fn main() {
     } else {
         println!("❌ {} violation(s) found:\n", violations.len());
         for (i, v) in violations.iter().enumerate() {
-            println!("[{}] {}", i + 1, v.message);
+            println!("[{}] {}", i + 1, v.path);
+            println!("    {}", v.message);
         }
         process::exit(1);
     }

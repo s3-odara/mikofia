@@ -70,3 +70,27 @@ fn reads_config_from_custom_path() {
         .success()
         .stdout(predicate::str::contains("All checks passed"));
 }
+
+#[test]
+fn reports_absolute_path_in_violation_output() {
+    let temp = TempDir::new().expect("create temp dir");
+    write_config(
+        &temp,
+        r#"{"nodes": [{"path": "missing.txt", "existence": "required"}]}"#,
+    );
+
+    let expected_path = temp.path().join("missing.txt");
+
+    Command::new(assert_cmd::cargo::cargo_bin!("mikofia-cli"))
+        .arg("--dir")
+        .arg(temp.path())
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains(
+            expected_path.to_string_lossy().as_ref(),
+        ))
+        .stdout(predicate::str::contains(
+            "Required item not found: missing.txt",
+        ))
+        .code(1);
+}
