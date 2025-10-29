@@ -2,6 +2,7 @@ mod context;
 mod ops;
 mod runtime;
 
+pub use context::{context_to_v8, create_context_with_fs};
 pub use runtime::DenoRuntime;
 
 use mikofia::Config;
