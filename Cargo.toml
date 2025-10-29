@@ -1,5 +1,5 @@
 [workspace]
-members = ["mikofia", "mikofia-cli"]
+members = ["mikofia", "mikofia-cli", "mikofia-deno"]
 resolver = "2"
 
 [workspace.package]

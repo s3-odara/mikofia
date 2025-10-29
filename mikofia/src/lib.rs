@@ -9,7 +9,10 @@ mod types;
 pub use engine::{check, check_with_fs};
 pub use fs::{FileSystem, RealFileSystem};
 pub use reporter::{ConsoleReporter, EvaluationResult, Reporter, violations_to_results};
-pub use types::{Config, Existence, Node, NodeKind, Violation};
+pub use types::{
+    Config, EvaluationContext, Existence, NativeRule, Node, NodeKind, ParentInfo, RuleHandle,
+    RuleResult, SiblingInfo, Violation,
+};
 
 #[cfg(test)]
 pub use fs::mock::MockFileSystem;

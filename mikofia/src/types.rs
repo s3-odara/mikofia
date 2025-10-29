@@ -20,6 +20,9 @@ pub struct Node {
 
     #[serde(default)]
     pub strict: Option<bool>,
+
+    #[serde(skip)]
+    pub rules: Vec<RuleHandle>,
 }
 
 impl Node {
@@ -121,4 +124,50 @@ impl Violation {
             args: Some(args),
         }
     }
+}
+
+/// Context provided to custom rules during evaluation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvaluationContext {
+    pub path: String,
+    pub name: String,
+    pub extension: Option<String>,
+    pub parent: Option<ParentInfo>,
+    pub siblings: Vec<SiblingInfo>,
+}
+
+/// Information about a parent directory
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParentInfo {
+    pub path: String,
+    pub name: String,
+}
+
+/// Information about a sibling file or directory
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SiblingInfo {
+    pub name: String,
+    pub is_file: bool,
+    pub is_directory: bool,
+}
+
+/// Handle to a validation rule (native or JavaScript)
+#[derive(Debug, Clone)]
+pub enum RuleHandle {
+    Native(std::sync::Arc<dyn NativeRule>),
+    // JavaScript rule handle will be added by mikofia-deno
+}
+
+/// Trait for native validation rules
+pub trait NativeRule: Send + Sync + std::fmt::Debug {
+    fn check(&self, ctx: &EvaluationContext) -> RuleResult;
+}
+
+/// Result of a rule evaluation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum RuleResult {
+    Pass,
+    Fail { violation: Violation },
+    Skip { reason: String },
 }
