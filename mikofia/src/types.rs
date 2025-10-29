@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::io;
 use std::path::Path;
 
@@ -86,8 +87,38 @@ impl Config {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Violation {
+    pub key: String,
     pub path: String,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub args: Option<HashMap<String, serde_json::Value>>,
+}
+
+impl Violation {
+    /// Create a new violation with key, path, and message
+    pub fn new(key: impl Into<String>, path: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            path: path.into(),
+            message: message.into(),
+            args: None,
+        }
+    }
+
+    /// Create a new violation with additional args
+    pub fn with_args(
+        key: impl Into<String>,
+        path: impl Into<String>,
+        message: impl Into<String>,
+        args: HashMap<String, serde_json::Value>,
+    ) -> Self {
+        Self {
+            key: key.into(),
+            path: path.into(),
+            message: message.into(),
+            args: Some(args),
+        }
+    }
 }

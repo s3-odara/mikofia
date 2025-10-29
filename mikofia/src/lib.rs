@@ -2,11 +2,13 @@ mod engine;
 mod fs;
 mod glob;
 mod pipeline;
+mod reporter;
 mod types;
 
 // Re-export public API
 pub use engine::{check, check_with_fs};
 pub use fs::{FileSystem, RealFileSystem};
+pub use reporter::{ConsoleReporter, EvaluationResult, Reporter, violations_to_results};
 pub use types::{Config, Existence, Node, NodeKind, Violation};
 
 #[cfg(test)]
@@ -246,6 +248,7 @@ mod tests {
 
         let violations = check_with_fs(&nodes, &root, &mock_fs);
         assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].key, "item-must-not-exist");
         assert_eq!(violations[0].message, "Item must not exist: temp.log");
     }
 
@@ -265,6 +268,7 @@ mod tests {
 
         let violations = check_with_fs(&nodes, &root, &mock_fs);
         assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].key, "expected-directory-found-file");
         assert_eq!(
             violations[0].message,
             "Expected directory, but found file: config"
@@ -287,6 +291,7 @@ mod tests {
 
         let violations = check_with_fs(&nodes, &root, &mock_fs);
         assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].key, "expected-file-found-directory");
         assert_eq!(
             violations[0].message,
             "Expected file, but found directory: src"
@@ -352,6 +357,7 @@ mod tests {
 
         let violations = check_with_fs(&nodes, &root, &mock_fs);
         assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].key, "unlisted-child");
         assert_eq!(violations[0].message, "Unlisted child item: secret.toml");
         assert_eq!(
             violations[0].path,
@@ -425,6 +431,7 @@ mod tests {
 
         let violations = check_with_fs(&nodes, &root, &mock_fs);
         assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].key, "unlisted-child");
         assert_eq!(violations[0].message, "Unlisted child item: app.yaml");
         assert_eq!(
             violations[0].path,
@@ -451,6 +458,7 @@ mod tests {
 
         let violations = check_with_fs(&nodes, &root, &mock_fs);
         assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].key, "expected-directory-found-file");
         assert_eq!(
             violations[0].path,
             root.join("config/app.toml")
@@ -478,6 +486,7 @@ mod tests {
 
         let violations = check_with_fs(&nodes, &root, &mock_fs);
         assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].key, "no-files-match-pattern");
         assert_eq!(
             violations[0].path,
             root.join("logs/*.log")

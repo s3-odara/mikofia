@@ -1,4 +1,5 @@
 use clap::Parser;
+use mikofia::Reporter;
 use std::path::PathBuf;
 use std::process;
 
@@ -51,15 +52,15 @@ fn main() {
     // Run validation
     let violations = mikofia::check(&config.nodes, &check_dir);
 
+    // Convert violations to results and report
+    let results = mikofia::violations_to_results(&violations);
+    let reporter = mikofia::ConsoleReporter;
+    reporter.report(&results);
+
+    // Exit with appropriate code
     if violations.is_empty() {
-        println!("✅ All checks passed!");
         process::exit(0);
     } else {
-        println!("❌ {} violation(s) found:\n", violations.len());
-        for (i, v) in violations.iter().enumerate() {
-            println!("[{}] {}", i + 1, v.path);
-            println!("    {}", v.message);
-        }
         process::exit(1);
     }
 }

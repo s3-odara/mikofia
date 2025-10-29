@@ -40,20 +40,22 @@ fn check_glob_node<F: FileSystem>(node: &Node, root: &Path, fs: &F) -> Vec<Viola
     let matched_paths = match glob::expand_glob(&node.path, root, fs) {
         Ok(paths) => paths,
         Err(e) => {
-            return vec![Violation {
-                path: absolute_pattern(root, &node.path),
-                message: e,
-            }];
+            return vec![Violation::new(
+                "glob-error",
+                absolute_pattern(root, &node.path),
+                e,
+            )];
         }
     };
 
     // If required and no matches, that's a violation
     if matched_paths.is_empty() {
         if matches!(node.existence, crate::types::Existence::Required) {
-            return vec![Violation {
-                path: absolute_pattern(root, &node.path),
-                message: format!("No files match required pattern: {}", node.path),
-            }];
+            return vec![Violation::new(
+                "no-files-match-pattern",
+                absolute_pattern(root, &node.path),
+                format!("No files match required pattern: {}", node.path),
+            )];
         }
         return vec![];
     }
@@ -152,9 +154,12 @@ fn check_strict<F: FileSystem>(node: &Node, dir_path: &Path, fs: &F) -> Vec<Viol
                 .iter()
                 .any(|(_, matcher)| matcher.is_match(item))
         })
-        .map(|item| Violation {
-            path: to_string_path(&dir_path.join(&item)),
-            message: format!("Unlisted child item: {}", item),
+        .map(|item| {
+            Violation::new(
+                "unlisted-child",
+                to_string_path(&dir_path.join(&item)),
+                format!("Unlisted child item: {}", item),
+            )
         })
         .collect()
 }
