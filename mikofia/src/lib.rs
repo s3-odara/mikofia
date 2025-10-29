@@ -219,4 +219,64 @@ mod tests {
         };
         assert!(!node.is_glob_pattern());
     }
+
+    #[test]
+    fn test_mock_fs_absent_violation() {
+        let mut mock_fs = MockFileSystem::new();
+        mock_fs.add_file("./temp.log", "data");
+
+        let nodes = vec![Node {
+            path: "temp.log".to_string(),
+            existence: Existence::Absent,
+            kind: NodeKind::Any,
+            children: vec![],
+            strict: None,
+        }];
+
+        let violations = check_with_fs(&nodes, &PathBuf::from("."), &mock_fs);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].message, "Item must not exist: temp.log");
+    }
+
+    #[test]
+    fn test_mock_fs_expected_directory_but_found_file() {
+        let mut mock_fs = MockFileSystem::new();
+        mock_fs.add_file("./config", "{}");
+
+        let nodes = vec![Node {
+            path: "config".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::Directory,
+            children: vec![],
+            strict: None,
+        }];
+
+        let violations = check_with_fs(&nodes, &PathBuf::from("."), &mock_fs);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(
+            violations[0].message,
+            "Expected directory, but found file: config"
+        );
+    }
+
+    #[test]
+    fn test_mock_fs_expected_file_but_found_directory() {
+        let mut mock_fs = MockFileSystem::new();
+        mock_fs.add_dir("./src");
+
+        let nodes = vec![Node {
+            path: "src".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::File,
+            children: vec![],
+            strict: None,
+        }];
+
+        let violations = check_with_fs(&nodes, &PathBuf::from("."), &mock_fs);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(
+            violations[0].message,
+            "Expected file, but found directory: src"
+        );
+    }
 }
