@@ -1,5 +1,5 @@
 use deno_core::v8;
-use mikofia::{EvaluationContext, RuleResult, Violation};
+use mikofia::{EvaluationContext, RuleResult};
 
 /// Handle to a JavaScript validation rule function
 #[derive(Clone)]
@@ -58,8 +58,6 @@ pub fn js_value_to_rule_result(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_rule_handle_debug() {
         // Just ensure Debug is implemented

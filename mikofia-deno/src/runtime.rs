@@ -1,6 +1,7 @@
-use deno_core::{serde_v8, v8, JsRuntime, ModuleSpecifier, RuntimeOptions};
+use deno_core::{serde_v8, v8, FsModuleLoader, JsRuntime, ModuleId, ModuleSpecifier, RuntimeOptions};
 use mikofia::{Config, EvaluationContext, RuleResult};
 use std::path::Path;
+use std::rc::Rc;
 
 /// Deno runtime wrapper for executing JavaScript/TypeScript rules
 pub struct DenoRuntime {
@@ -11,6 +12,7 @@ impl DenoRuntime {
     /// Create a new Deno runtime with mikofia extensions
     pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let js_runtime = JsRuntime::new(RuntimeOptions {
+            module_loader: Some(Rc::new(FsModuleLoader)),
             extensions: vec![crate::ops::init_ops()],
             ..Default::default()
         });
@@ -39,33 +41,31 @@ impl DenoRuntime {
         result.await?;
 
         // Extract the default export and convert to Config
-        let config_json = self.get_default_export()?;
-        let config: Config = serde_json::from_value(config_json)?;
+        let config = self.get_default_export(module_id)?;
 
         Ok(config)
     }
 
-    /// Get the default export from the most recently loaded module
-    fn get_default_export(&mut self) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
-        // Execute script to get default export
-        let value_global = self.js_runtime.execute_script(
-            "<get_default_export>",
-            r#"
-                (function() {
-                    // Access the module namespace
-                    // This assumes the default export is available
-                    // We'll need to improve this to properly access module exports
-                    return globalThis.__mikofiaConfig || {};
-                })()
-            "#,
-        )?;
+    /// Get the default export from a loaded module
+    fn get_default_export(&mut self, module_id: ModuleId) -> Result<Config, Box<dyn std::error::Error + Send + Sync>> {
+        // Get the module namespace object
+        let module_namespace = self.js_runtime.get_module_namespace(module_id)?;
 
-        // Convert V8 value to JSON
+        // Access the "default" property from the namespace
         let scope = &mut self.js_runtime.handle_scope();
-        let local_value = deno_core::v8::Local::new(scope, value_global);
-        let json_value: serde_json::Value = serde_v8::from_v8(scope, local_value)?;
+        let module_namespace_local = v8::Local::new(scope, module_namespace);
 
-        Ok(json_value)
+        let default_key = v8::String::new(scope, "default")
+            .ok_or("Failed to create 'default' string")?;
+
+        let default_export = module_namespace_local
+            .get(scope, default_key.into())
+            .ok_or("No default export found in module")?;
+
+        // Convert V8 value to Config
+        let config: Config = serde_v8::from_v8(scope, default_export)?;
+
+        Ok(config)
     }
 
     /// Execute JavaScript code and return the result

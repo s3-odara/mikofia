@@ -47,17 +47,17 @@ fn create_fs_object<'s>(
     // - Deno.core.ops.op_exists(path)
     //
     // We create wrapper functions here for a cleaner API
-    let read_file_src = r#"
+    let _read_file_src = r#"
         async function readFile(path) {
             return await Deno.core.ops.op_read_file(path);
         }
     "#;
-    let read_json_src = r#"
+    let _read_json_src = r#"
         async function readJson(path) {
             return await Deno.core.ops.op_read_json(path);
         }
     "#;
-    let exists_src = r#"
+    let _exists_src = r#"
         function exists(path) {
             return Deno.core.ops.op_exists(path) === 1;
         }

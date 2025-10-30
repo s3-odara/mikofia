@@ -1,0 +1,25 @@
+{
+  "name": "@mikofia/types",
+  "version": "0.1.0",
+  "description": "TypeScript type definitions for Mikofia file structure validator",
+  "main": "types.d.ts",
+  "types": "types.d.ts",
+  "files": [
+    "types.d.ts",
+    "README.md"
+  ],
+  "keywords": [
+    "mikofia",
+    "types",
+    "typescript",
+    "file-structure",
+    "validation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/med0rei/mikofia.git",
+    "directory": "mikofia-deno"
+  }
+}
