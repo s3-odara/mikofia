@@ -4144,8 +4144,10 @@ dependencies = [
  "assert_cmd",
  "clap",
  "mikofia",
+ "mikofia-deno",
  "predicates",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -4158,6 +4160,7 @@ dependencies = [
  "mikofia",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 
