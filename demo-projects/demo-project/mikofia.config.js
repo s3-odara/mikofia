@@ -1,10 +1,10 @@
 // @ts-check
-/// <reference path="../mikofia-deno/types.d.ts" />
+/// <reference path="../../mikofia-deno/types.d.ts" />
 
 /**
  * Custom Rule 1: Check kebab-case naming convention for TypeScript files
  * TypeScript files should use kebab-case (e.g., my-file.ts), not snake_case
- * @type {import('../mikofia-deno/types.d.ts').RuleFunction}
+ * @type {import('../../mikofia-deno/types.d.ts').RuleFunction}
  */
 async function checkKebabCase(ctx) {
   // Only check .ts files
@@ -23,7 +23,7 @@ async function checkKebabCase(ctx) {
         key: "invalid-naming-convention",
         message: `File "${ctx.name}" uses snake_case. Use kebab-case instead (e.g., ${filename.replace(
           /_/g,
-          "-"
+          "-",
         )}.ts)`,
       },
     };
@@ -46,11 +46,11 @@ async function checkKebabCase(ctx) {
 /**
  * Custom Rule 2: Require README.md in root directory
  * Checks if siblings contain a README file
- * @type {import('../mikofia-deno/types.d.ts').RuleFunction}
+ * @type {import('../../mikofia-deno/types.d.ts').RuleFunction}
  */
 async function requireReadme(ctx) {
   const hasReadme = ctx.siblings.some(
-    (s) => s.name.toLowerCase() === "readme.md" && s.is_file
+    (s) => s.name.toLowerCase() === "readme.md" && s.is_file,
   );
 
   if (!hasReadme) {
@@ -69,7 +69,7 @@ async function requireReadme(ctx) {
 /**
  * Custom Rule 3: Require corresponding test file
  * For each .ts file in src/, there should be a .test.ts file in tests/
- * @type {import('../mikofia-deno/types.d.ts').RuleFunction}
+ * @type {import('../../mikofia-deno/types.d.ts').RuleFunction}
  */
 async function requireCorrespondingTest(ctx) {
   // Only check .ts files, skip .test.ts files
@@ -84,7 +84,9 @@ async function requireCorrespondingTest(ctx) {
 
   // Construct expected test file path
   const basename = ctx.name.replace(/\.ts$/, "");
-  const testFilePath = ctx.path.replace(/\/src\//, "/tests/").replace(/\.ts$/, ".test.ts");
+  const testFilePath = ctx.path
+    .replace(/\/src\//, "/tests/")
+    .replace(/\.ts$/, ".test.ts");
 
   // Check if test file exists using Deno ops
   try {
@@ -114,7 +116,7 @@ async function requireCorrespondingTest(ctx) {
 /**
  * Custom Rule 4: Require minimum number of documentation files
  * docs/ directory should contain at least one .md file
- * @type {import('../mikofia-deno/types.d.ts').RuleFunction}
+ * @type {import('../../mikofia-deno/types.d.ts').RuleFunction}
  */
 async function requireMinimumDocs(ctx) {
   // Only check docs directory
@@ -123,7 +125,7 @@ async function requireMinimumDocs(ctx) {
   }
 
   const mdFiles = ctx.siblings.filter(
-    (s) => s.name.endsWith(".md") && s.is_file
+    (s) => s.name.endsWith(".md") && s.is_file,
   );
 
   if (mdFiles.length < 1) {
@@ -142,7 +144,7 @@ async function requireMinimumDocs(ctx) {
 /**
  * Custom Rule 5: Check for forbidden file name patterns
  * Files should not contain "temp", "tmp", or "backup" in their names
- * @type {import('../mikofia-deno/types.d.ts').RuleFunction}
+ * @type {import('../../mikofia-deno/types.d.ts').RuleFunction}
  */
 async function checkForbiddenNames(ctx) {
   const forbiddenPatterns = ["temp", "tmp", "backup"];
@@ -163,7 +165,7 @@ async function checkForbiddenNames(ctx) {
   return { type: "pass" };
 }
 
-/** @type {import('../mikofia-deno/types.d.ts').Config} */
+/** @type {import('../../mikofia-deno/types.d.ts').Config} */
 const config = {
   nodes: [
     {
