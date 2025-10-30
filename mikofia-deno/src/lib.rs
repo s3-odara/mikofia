@@ -245,4 +245,124 @@ mod tests {
         assert_eq!(config.nodes[0].children[1].path, "lib.rs");
         assert_eq!(config.nodes[0].strict, Some(true));
     }
+
+    #[tokio::test]
+    async fn test_load_config_with_rules_extracts_functions() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("rules.config.js");
+
+        let config_content = r#"
+            export default {
+                nodes: [
+                    {
+                        path: "src/**/*.ts",
+                        rules: [
+                            async () => ({ type: "pass" }),
+                            async () => ({ type: "skip", reason: "noop" })
+                        ],
+                        children: [
+                            {
+                                path: "nested/*.js",
+                                rules: [
+                                    () => ({
+                                        type: "fail",
+                                        violation: {
+                                            key: "demo",
+                                            message: "should not see this message"
+                                        }
+                                    })
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            };
+        "#;
+
+        fs::write(&config_path, config_content).unwrap();
+
+        let mut runtime = DenoRuntime::new().unwrap();
+        let (config, rules_map) = runtime
+            .load_config_with_rules(&config_path)
+            .await
+            .unwrap();
+
+        assert_eq!(config.nodes.len(), 1);
+
+        let mut pattern_counts: Vec<(String, usize)> = rules_map
+            .iter()
+            .map(|(pattern, rules)| (pattern.clone(), rules.len()))
+            .collect();
+        pattern_counts.sort_by(|a, b| a.0.cmp(&b.0));
+
+        assert_eq!(
+            pattern_counts,
+            vec![
+                ("src/**/*.ts".to_string(), 2),
+                ("src/**/*.ts/nested/*.js".to_string(), 1)
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_check_with_javascript_rules_applies_custom_rule() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+
+        let config_path = root.join("mikofia.config.js");
+        let config_content = r#"
+            export default {
+                nodes: [
+                    {
+                        path: "src/**/*.ts",
+                        existence: "optional",
+                        kind: "file",
+                        rules: [
+                            (ctx) => {
+                                if (ctx.name.includes("bad")) {
+                                    return {
+                                        type: "fail",
+                                        violation: {
+                                            key: "invalid-name",
+                                            message: `Unexpected filename: ${ctx.name}`
+                                        }
+                                    };
+                                }
+                                return { type: "pass" };
+                            }
+                        ]
+                    }
+                ]
+            };
+        "#;
+
+        fs::write(&config_path, config_content).unwrap();
+
+        let src_dir = root.join("src/components");
+        fs::create_dir_all(&src_dir).unwrap();
+        let bad_file = src_dir.join("bad_file.ts");
+        fs::write(&bad_file, "// demo").unwrap();
+
+        let mut runtime = DenoRuntime::new().unwrap();
+        let (config, rules_map) = runtime
+            .load_config_with_rules(&config_path)
+            .await
+            .unwrap();
+
+        let violations = check_with_javascript_rules(config, root, rules_map, &mut runtime)
+            .await
+            .unwrap();
+
+        assert_eq!(violations.len(), 1);
+        let violation = &violations[0];
+        assert_eq!(violation.key, "invalid-name");
+        assert!(
+            violation.message.contains("bad_file.ts"),
+            "violation message was {}", violation.message
+        );
+        assert!(
+            violation.path.ends_with("bad_file.ts"),
+            "violation path was {}", violation.path
+        );
+    }
 }
