@@ -117,7 +117,7 @@ mod tests {
                     kind: NodeKind::File,
                     children: vec![],
                     strict: None,
-            rules: vec![],
+                    rules: vec![],
                 },
                 Node {
                     path: "lib.rs".to_string(),
@@ -125,7 +125,7 @@ mod tests {
                     kind: NodeKind::File,
                     children: vec![],
                     strict: None,
-            rules: vec![],
+                    rules: vec![],
                 },
             ],
             strict: Some(true),
@@ -339,7 +339,7 @@ mod tests {
                     kind: NodeKind::File,
                     children: vec![],
                     strict: None,
-            rules: vec![],
+                    rules: vec![],
                 },
                 Node {
                     path: "dev.toml".to_string(),
@@ -347,7 +347,7 @@ mod tests {
                     kind: NodeKind::File,
                     children: vec![],
                     strict: None,
-            rules: vec![],
+                    rules: vec![],
                 },
             ],
             strict: Some(true),
@@ -376,7 +376,7 @@ mod tests {
                 kind: NodeKind::File,
                 children: vec![],
                 strict: None,
-            rules: vec![],
+                rules: vec![],
             }],
             strict: Some(true),
             rules: vec![],
@@ -411,7 +411,7 @@ mod tests {
                 kind: NodeKind::File,
                 children: vec![],
                 strict: None,
-            rules: vec![],
+                rules: vec![],
             }],
             strict: Some(true),
             rules: vec![],
@@ -446,7 +446,7 @@ mod tests {
                     kind: NodeKind::File,
                     children: vec![],
                     strict: None,
-            rules: vec![],
+                    rules: vec![],
                 },
                 Node {
                     path: "*.toml".to_string(),
@@ -454,7 +454,7 @@ mod tests {
                     kind: NodeKind::File,
                     children: vec![],
                     strict: None,
-            rules: vec![],
+                    rules: vec![],
                 },
             ],
             strict: Some(true),
@@ -467,9 +467,7 @@ mod tests {
         assert_eq!(violations[0].message, "Unlisted child item: app.yaml");
         assert_eq!(
             violations[0].path,
-            root.join("config/app.yaml")
-                .to_string_lossy()
-                .into_owned()
+            root.join("config/app.yaml").to_string_lossy().into_owned()
         );
     }
 
@@ -494,9 +492,7 @@ mod tests {
         assert_eq!(violations[0].key, "expected-directory-found-file");
         assert_eq!(
             violations[0].path,
-            root.join("config/app.toml")
-                .to_string_lossy()
-                .into_owned()
+            root.join("config/app.toml").to_string_lossy().into_owned()
         );
         assert_eq!(
             violations[0].message,
@@ -523,9 +519,7 @@ mod tests {
         assert_eq!(violations[0].key, "no-files-match-pattern");
         assert_eq!(
             violations[0].path,
-            root.join("logs/*.log")
-                .to_string_lossy()
-                .into_owned()
+            root.join("logs/*.log").to_string_lossy().into_owned()
         );
         assert_eq!(
             violations[0].message,
@@ -616,7 +610,68 @@ mod tests {
         }];
 
         let violations = check_with_fs(&nodes, &root, &fs);
-        assert!(violations.is_empty(), "unexpected violations: {violations:?}");
+        assert!(
+            violations.is_empty(),
+            "unexpected violations: {violations:?}"
+        );
         assert!(fs.read_dir_called.get());
+    }
+
+    #[test]
+    fn test_permission_denied_directory_reports_violation() {
+        let root = mock_root();
+        let mut mock_fs = MockFileSystem::new();
+        let protected = root.join("protected");
+
+        mock_fs.add_dir(protected.clone());
+        mock_fs.deny_dir(protected.clone());
+
+        let nodes = vec![Node {
+            path: "protected".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::Directory,
+            children: vec![],
+            strict: Some(true),
+            rules: vec![],
+        }];
+
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        assert_eq!(violations.len(), 1, "expected single violation");
+        let violation = &violations[0];
+        assert_eq!(violation.key, "permission-denied");
+        assert!(
+            violation.message.contains("insufficient permissions"),
+            "unexpected message: {}",
+            violation.message
+        );
+    }
+
+    #[test]
+    fn test_permission_denied_glob_reports_violation() {
+        let root = mock_root();
+        let mut mock_fs = MockFileSystem::new();
+        let protected = root.join("logs");
+
+        mock_fs.add_dir(protected.clone());
+        mock_fs.deny_dir(protected.clone());
+
+        let nodes = vec![Node {
+            path: "logs/**/*.log".to_string(),
+            existence: Existence::Optional,
+            kind: NodeKind::Any,
+            children: vec![],
+            strict: None,
+            rules: vec![],
+        }];
+
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        assert_eq!(violations.len(), 1, "expected single violation");
+        let violation = &violations[0];
+        assert_eq!(violation.key, "permission-denied");
+        assert!(
+            violation.message.contains("insufficient permissions"),
+            "unexpected message: {}",
+            violation.message
+        );
     }
 }

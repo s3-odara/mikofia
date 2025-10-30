@@ -101,7 +101,11 @@ pub struct Violation {
 
 impl Violation {
     /// Create a new violation with key, path, and message
-    pub fn new(key: impl Into<String>, path: impl Into<String>, message: impl Into<String>) -> Self {
+    pub fn new(
+        key: impl Into<String>,
+        path: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
         Self {
             key: key.into(),
             path: path.into(),

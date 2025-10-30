@@ -36,10 +36,8 @@ pub struct ConsoleReporter;
 
 impl Reporter for ConsoleReporter {
     fn report(&self, results: &[EvaluationResult]) {
-        let violations: Vec<&EvaluationResult> = results
-            .iter()
-            .filter(|r| r.violation.is_some())
-            .collect();
+        let violations: Vec<&EvaluationResult> =
+            results.iter().filter(|r| r.violation.is_some()).collect();
 
         if violations.is_empty() {
             println!("✅ All checks passed!");
@@ -110,9 +108,11 @@ mod tests {
     #[test]
     fn test_console_reporter_with_violations() {
         let reporter = ConsoleReporter;
-        let violations = vec![
-            Violation::new("test-key", "/project/test.txt", "Test violation"),
-        ];
+        let violations = vec![Violation::new(
+            "test-key",
+            "/project/test.txt",
+            "Test violation",
+        )];
         let results = violations_to_results(&violations);
         reporter.report(&results); // Should print violation details
     }

@@ -86,7 +86,14 @@ async fn main() {
             };
 
             // Run checks with JavaScript rules
-            match mikofia_deno::check_with_javascript_rules(config, &check_dir, rules_map, &mut runtime).await {
+            match mikofia_deno::check_with_javascript_rules(
+                config,
+                &check_dir,
+                rules_map,
+                &mut runtime,
+            )
+            .await
+            {
                 Ok(v) => v,
                 Err(e) => {
                     eprintln!("❌ Failed to run checks: {}", e);

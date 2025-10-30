@@ -21,6 +21,19 @@ pub trait FileSystem {
         F: Fn(&Path) -> bool;
 }
 
+/// Determine if an I/O error represents a permission problem
+pub fn is_permission_denied(error: &io::Error) -> bool {
+    matches!(error.kind(), io::ErrorKind::PermissionDenied)
+}
+
+/// Human-readable guidance for permission failures
+pub fn permission_denied_message(path: &Path) -> String {
+    format!(
+        "Cannot access {} due to insufficient permissions. Grant access or rerun with elevated rights.",
+        path.display()
+    )
+}
+
 /// Real filesystem implementation
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RealFileSystem;
@@ -36,10 +49,15 @@ impl FileSystem for RealFileSystem {
 
     fn read_dir(&self, path: &Path) -> io::Result<Vec<String>> {
         let entries = std::fs::read_dir(path)?;
-        Ok(entries
-            .filter_map(|e| e.ok())
-            .filter_map(|e| e.file_name().into_string().ok())
-            .collect())
+        entries
+            .map(|entry| {
+                let entry = entry?;
+                entry
+                    .file_name()
+                    .into_string()
+                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid unicode"))
+            })
+            .collect()
     }
 
     fn read_to_string(&self, path: &Path) -> io::Result<String> {
@@ -52,12 +70,36 @@ impl FileSystem for RealFileSystem {
     {
         use walkdir::WalkDir;
 
-        let matches: Vec<PathBuf> = WalkDir::new(path)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|entry| predicate(entry.path()))
-            .map(|entry| entry.path().to_path_buf())
-            .collect();
+        let mut matches: Vec<PathBuf> = Vec::new();
+
+        for entry in WalkDir::new(path) {
+            match entry {
+                Ok(entry) => {
+                    let entry_path = entry.path();
+                    if predicate(entry_path) {
+                        matches.push(entry_path.to_path_buf());
+                    }
+                }
+                Err(err) => {
+                    if let Some(io_err) = err.io_error() {
+                        if io_err.kind() == io::ErrorKind::PermissionDenied {
+                            let denied_path = err
+                                .path()
+                                .map(|p| p.to_path_buf())
+                                .unwrap_or_else(|| path.to_path_buf());
+
+                            return Err(io::Error::new(
+                                io::ErrorKind::PermissionDenied,
+                                format!(
+                                    "Permission denied while accessing {}",
+                                    denied_path.display()
+                                ),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
 
         Ok(matches)
     }
@@ -66,13 +108,14 @@ impl FileSystem for RealFileSystem {
 #[cfg(test)]
 pub mod mock {
     use super::*;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     /// Mock filesystem for testing
     #[derive(Debug, Clone, Default)]
     pub struct MockFileSystem {
         files: HashMap<PathBuf, String>,
         directories: Vec<PathBuf>,
+        restricted_paths: HashSet<PathBuf>,
     }
 
     impl MockFileSystem {
@@ -89,6 +132,11 @@ pub mod mock {
         pub fn add_dir(&mut self, path: impl Into<PathBuf>) {
             self.directories.push(path.into());
         }
+
+        /// Mark a directory as inaccessible to simulate permission errors
+        pub fn deny_dir(&mut self, path: impl Into<PathBuf>) {
+            self.restricted_paths.insert(path.into());
+        }
     }
 
     impl FileSystem for MockFileSystem {
@@ -103,6 +151,14 @@ pub mod mock {
 
         fn read_dir(&self, path: &Path) -> io::Result<Vec<String>> {
             let path_buf = path.to_path_buf();
+
+            if self.restricted_paths.contains(&path_buf) {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!("Permission denied: {}", path.display()),
+                ));
+            }
+
             let mut children: Vec<String> = self
                 .files
                 .keys()
@@ -145,6 +201,19 @@ pub mod mock {
         where
             F: Fn(&Path) -> bool,
         {
+            let denied_path = self
+                .restricted_paths
+                .iter()
+                .find(|restricted| restricted.starts_with(base) || base.starts_with(restricted))
+                .cloned();
+
+            if let Some(path) = denied_path {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!("Permission denied: {}", path.display()),
+                ));
+            }
+
             let matches: Vec<PathBuf> = self
                 .files
                 .keys()

@@ -1,4 +1,6 @@
-use deno_core::{serde_v8, v8, FsModuleLoader, JsRuntime, ModuleId, ModuleSpecifier, RuntimeOptions};
+use deno_core::{
+    FsModuleLoader, JsRuntime, ModuleId, ModuleSpecifier, RuntimeOptions, serde_v8, v8,
+};
 use mikofia::{Config, EvaluationContext, RuleResult};
 use std::path::Path;
 use std::rc::Rc;
@@ -26,8 +28,8 @@ impl DenoRuntime {
         path: &Path,
     ) -> Result<Config, Box<dyn std::error::Error + Send + Sync>> {
         // Convert path to module specifier
-        let module_specifier = ModuleSpecifier::from_file_path(path)
-            .map_err(|_| "Invalid file path")?;
+        let module_specifier =
+            ModuleSpecifier::from_file_path(path).map_err(|_| "Invalid file path")?;
 
         // Load the module
         let module_id = self
@@ -50,10 +52,16 @@ impl DenoRuntime {
     pub async fn load_config_with_rules(
         &mut self,
         path: &Path,
-    ) -> Result<(Config, Vec<(String, Vec<crate::rules::JavaScriptRuleHandle>)>), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<
+        (
+            Config,
+            Vec<(String, Vec<crate::rules::JavaScriptRuleHandle>)>,
+        ),
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         // Convert path to module specifier
-        let module_specifier = ModuleSpecifier::from_file_path(path)
-            .map_err(|_| "Invalid file path")?;
+        let module_specifier =
+            ModuleSpecifier::from_file_path(path).map_err(|_| "Invalid file path")?;
 
         // Load the module
         let module_id = self
@@ -73,7 +81,10 @@ impl DenoRuntime {
     }
 
     /// Get the default export from a loaded module
-    fn get_default_export(&mut self, module_id: ModuleId) -> Result<Config, Box<dyn std::error::Error + Send + Sync>> {
+    fn get_default_export(
+        &mut self,
+        module_id: ModuleId,
+    ) -> Result<Config, Box<dyn std::error::Error + Send + Sync>> {
         // Get the module namespace object
         let module_namespace = self.js_runtime.get_module_namespace(module_id)?;
 
@@ -81,8 +92,8 @@ impl DenoRuntime {
         let scope = &mut self.js_runtime.handle_scope();
         let module_namespace_local = v8::Local::new(scope, module_namespace);
 
-        let default_key = v8::String::new(scope, "default")
-            .ok_or("Failed to create 'default' string")?;
+        let default_key =
+            v8::String::new(scope, "default").ok_or("Failed to create 'default' string")?;
 
         let default_export = module_namespace_local
             .get(scope, default_key.into())
@@ -98,7 +109,13 @@ impl DenoRuntime {
     fn extract_config_and_rules(
         &mut self,
         module_id: ModuleId,
-    ) -> Result<(Config, Vec<(String, Vec<crate::rules::JavaScriptRuleHandle>)>), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<
+        (
+            Config,
+            Vec<(String, Vec<crate::rules::JavaScriptRuleHandle>)>,
+        ),
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         // Get the module namespace object
         let module_namespace = self.js_runtime.get_module_namespace(module_id)?;
 
@@ -107,8 +124,8 @@ impl DenoRuntime {
             let scope = &mut self.js_runtime.handle_scope();
             let module_namespace_local = v8::Local::new(scope, module_namespace.clone());
 
-            let default_key = v8::String::new(scope, "default")
-                .ok_or("Failed to create 'default' string")?;
+            let default_key =
+                v8::String::new(scope, "default").ok_or("Failed to create 'default' string")?;
 
             let default_export = module_namespace_local
                 .get(scope, default_key.into())
@@ -123,8 +140,8 @@ impl DenoRuntime {
             let scope = &mut self.js_runtime.handle_scope();
             let module_namespace_local = v8::Local::new(scope, module_namespace);
 
-            let default_key = v8::String::new(scope, "default")
-                .ok_or("Failed to create 'default' string")?;
+            let default_key =
+                v8::String::new(scope, "default").ok_or("Failed to create 'default' string")?;
 
             let default_export = module_namespace_local
                 .get(scope, default_key.into())
@@ -140,7 +157,10 @@ impl DenoRuntime {
     fn extract_rules_from_nodes(
         scope: &mut v8::HandleScope,
         config_obj: v8::Local<v8::Value>,
-    ) -> Result<Vec<(String, Vec<crate::rules::JavaScriptRuleHandle>)>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<
+        Vec<(String, Vec<crate::rules::JavaScriptRuleHandle>)>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         let mut rules_map = Vec::new();
 
         // Get the config object
@@ -149,8 +169,7 @@ impl DenoRuntime {
             .map_err(|_| "Config is not an object")?;
 
         // Get the nodes array
-        let nodes_key = v8::String::new(scope, "nodes")
-            .ok_or("Failed to create 'nodes' string")?;
+        let nodes_key = v8::String::new(scope, "nodes").ok_or("Failed to create 'nodes' string")?;
         let nodes = config_obj
             .get(scope, nodes_key.into())
             .ok_or("No nodes property")?;
@@ -160,7 +179,9 @@ impl DenoRuntime {
             let len = nodes_array.length();
 
             for i in 0..len {
-                let node = nodes_array.get_index(scope, i).ok_or("Failed to get node")?;
+                let node = nodes_array
+                    .get_index(scope, i)
+                    .ok_or("Failed to get node")?;
                 Self::extract_rules_from_node(scope, node, "", &mut rules_map)?;
             }
         }
@@ -182,7 +203,9 @@ impl DenoRuntime {
 
         // Get path
         let path_key = v8::String::new(scope, "path").ok_or("Failed to create 'path' string")?;
-        let path = node_obj.get(scope, path_key.into()).ok_or("No path property")?;
+        let path = node_obj
+            .get(scope, path_key.into())
+            .ok_or("No path property")?;
         let path_str: String = serde_v8::from_v8(scope, path)?;
 
         let full_path = if parent_path.is_empty() {
@@ -216,7 +239,8 @@ impl DenoRuntime {
         }
 
         // Process children
-        let children_key = v8::String::new(scope, "children").ok_or("Failed to create 'children' string")?;
+        let children_key =
+            v8::String::new(scope, "children").ok_or("Failed to create 'children' string")?;
         if let Some(children) = node_obj.get(scope, children_key.into()) {
             if children.is_array() {
                 let children_array: v8::Local<v8::Array> = children.try_into().unwrap();

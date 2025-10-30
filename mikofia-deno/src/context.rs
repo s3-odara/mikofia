@@ -20,15 +20,15 @@ pub fn create_context_with_fs<'s>(
 ) -> Result<v8::Local<'s, v8::Object>, Box<dyn std::error::Error + Send + Sync>> {
     // First, convert the EvaluationContext to a V8 object
     let ctx_value = serde_v8::to_v8(scope, ctx)?;
-    let ctx_obj: v8::Local<v8::Object> = ctx_value.try_into()
+    let ctx_obj: v8::Local<v8::Object> = ctx_value
+        .try_into()
         .map_err(|_| "Failed to convert context to object")?;
 
     // Create the fs object with bound methods
     let fs_obj = create_fs_object(scope)?;
 
     // Attach the fs object to the context
-    let fs_key = v8::String::new(scope, "fs")
-        .ok_or("Failed to create 'fs' key")?;
+    let fs_key = v8::String::new(scope, "fs").ok_or("Failed to create 'fs' key")?;
     ctx_obj.set(scope, fs_key.into(), fs_obj.into());
 
     Ok(ctx_obj)

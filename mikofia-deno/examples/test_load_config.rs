@@ -16,8 +16,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("  Total nodes: {}", config.nodes.len());
 
     for (i, node) in config.nodes.iter().enumerate() {
-        println!("  [{}] path: {}, existence: {:?}, kind: {:?}",
-            i, node.path, node.existence, node.kind);
+        println!(
+            "  [{}] path: {}, existence: {:?}, kind: {:?}",
+            i, node.path, node.existence, node.kind
+        );
 
         if !node.children.is_empty() {
             println!("      children: {}", node.children.len());

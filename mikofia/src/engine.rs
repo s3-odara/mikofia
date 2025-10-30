@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::fs::{FileSystem, RealFileSystem};
+use crate::fs::{self, FileSystem, RealFileSystem};
 use crate::glob;
 use crate::pipeline::CheckPipeline;
 use crate::types::{
@@ -49,11 +49,18 @@ fn check_glob_node<F: FileSystem>(node: &Node, root: &Path, fs: &F) -> Vec<Viola
     // Expand glob pattern
     let matched_paths = match glob::expand_glob(&node.path, root, fs) {
         Ok(paths) => paths,
-        Err(e) => {
+        Err(glob::GlobError::Walk { error, .. }) if fs::is_permission_denied(&error) => {
+            return vec![Violation::new(
+                "permission-denied",
+                absolute_pattern(root, &node.path),
+                fs::permission_denied_message(&normalize_join(root, &node.path)),
+            )];
+        }
+        Err(err) => {
             return vec![Violation::new(
                 "glob-error",
                 absolute_pattern(root, &node.path),
-                e,
+                err.to_string(),
             )];
         }
     };
@@ -93,7 +100,11 @@ fn check_glob_node<F: FileSystem>(node: &Node, root: &Path, fs: &F) -> Vec<Viola
         .collect()
 }
 
-fn check_directory_violations<F: FileSystem>(node: &Node, dir_path: &Path, fs: &F) -> Vec<Violation> {
+fn check_directory_violations<F: FileSystem>(
+    node: &Node,
+    dir_path: &Path,
+    fs: &F,
+) -> Vec<Violation> {
     let strict_violations = check_strict(node, dir_path, fs);
     let children_violations = check_children(node, dir_path, fs);
 
@@ -118,7 +129,17 @@ fn check_strict<F: FileSystem>(node: &Node, dir_path: &Path, fs: &F) -> Vec<Viol
     // Get actual items in directory
     let actual_items: Vec<String> = match fs.read_dir(dir_path) {
         Ok(items) => items,
-        Err(_) => return vec![], // Ignore read errors
+        Err(err) => {
+            if fs::is_permission_denied(&err) {
+                return vec![Violation::new(
+                    "permission-denied",
+                    to_string_path(dir_path),
+                    fs::permission_denied_message(dir_path),
+                )];
+            }
+
+            return vec![];
+        }
     };
 
     // Split child nodes into literal names and compiled glob matchers using iterator transforms.
@@ -130,9 +151,7 @@ fn check_strict<F: FileSystem>(node: &Node, dir_path: &Path, fs: &F) -> Vec<Viol
             std::path::Path::new(&child.path)
                 .components()
                 .find_map(|component| match component {
-                    std::path::Component::Normal(name) => {
-                        Some(name.to_string_lossy().into_owned())
-                    }
+                    std::path::Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
                     _ => None,
                 })
                 .unwrap_or_else(|| child.path.clone())
@@ -213,19 +232,22 @@ fn build_evaluation_context<F: FileSystem>(path: &Path, fs: &F) -> EvaluationCon
     });
 
     let siblings = if let Some(parent_path) = path.parent() {
-        fs.read_dir(parent_path)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|sibling_name| sibling_name != &name)
-            .map(|sibling_name| {
-                let sibling_path = parent_path.join(&sibling_name);
-                SiblingInfo {
-                    name: sibling_name,
-                    is_file: !fs.is_dir(&sibling_path),
-                    is_directory: fs.is_dir(&sibling_path),
-                }
-            })
-            .collect()
+        match fs.read_dir(parent_path) {
+            Ok(entries) => entries
+                .into_iter()
+                .filter(|sibling_name| sibling_name != &name)
+                .map(|sibling_name| {
+                    let sibling_path = parent_path.join(&sibling_name);
+                    SiblingInfo {
+                        name: sibling_name,
+                        is_file: !fs.is_dir(&sibling_path),
+                        is_directory: fs.is_dir(&sibling_path),
+                    }
+                })
+                .collect(),
+            Err(err) if fs::is_permission_denied(&err) => vec![],
+            Err(_) => vec![],
+        }
     } else {
         vec![]
     };

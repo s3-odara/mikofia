@@ -4,7 +4,7 @@ mod rules;
 mod runtime;
 
 pub use context::{context_to_v8, create_context_with_fs};
-pub use rules::{js_value_to_rule_result, JavaScriptRuleHandle};
+pub use rules::{JavaScriptRuleHandle, js_value_to_rule_result};
 pub use runtime::DenoRuntime;
 
 use mikofia::Config;
@@ -25,7 +25,7 @@ pub async fn check_with_javascript_rules(
     rules_map: Vec<(String, Vec<JavaScriptRuleHandle>)>,
     runtime: &mut DenoRuntime,
 ) -> Result<Vec<mikofia::Violation>, Box<dyn std::error::Error + Send + Sync>> {
-    use mikofia::{check, RealFileSystem};
+    use mikofia::{RealFileSystem, check};
 
     // 1. Run standard checks
     let mut violations = check(&config.nodes, root);
@@ -282,10 +282,7 @@ mod tests {
         fs::write(&config_path, config_content).unwrap();
 
         let mut runtime = DenoRuntime::new().unwrap();
-        let (config, rules_map) = runtime
-            .load_config_with_rules(&config_path)
-            .await
-            .unwrap();
+        let (config, rules_map) = runtime.load_config_with_rules(&config_path).await.unwrap();
 
         assert_eq!(config.nodes.len(), 1);
 
@@ -344,10 +341,7 @@ mod tests {
         fs::write(&bad_file, "// demo").unwrap();
 
         let mut runtime = DenoRuntime::new().unwrap();
-        let (config, rules_map) = runtime
-            .load_config_with_rules(&config_path)
-            .await
-            .unwrap();
+        let (config, rules_map) = runtime.load_config_with_rules(&config_path).await.unwrap();
 
         let violations = check_with_javascript_rules(config, root, rules_map, &mut runtime)
             .await
@@ -358,11 +352,13 @@ mod tests {
         assert_eq!(violation.key, "invalid-name");
         assert!(
             violation.message.contains("bad_file.ts"),
-            "violation message was {}", violation.message
+            "violation message was {}",
+            violation.message
         );
         assert!(
             violation.path.ends_with("bad_file.ts"),
-            "violation path was {}", violation.path
+            "violation path was {}",
+            violation.path
         );
     }
 }

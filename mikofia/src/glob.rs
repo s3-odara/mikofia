@@ -1,7 +1,36 @@
 use globset::Glob;
+use std::fmt;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::fs::FileSystem;
+
+/// Errors that can occur during glob expansion
+#[derive(Debug)]
+pub enum GlobError {
+    InvalidPattern { pattern: String, details: String },
+    Walk { base: PathBuf, error: io::Error },
+}
+
+impl fmt::Display for GlobError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GlobError::InvalidPattern { pattern, details } => {
+                write!(f, "Invalid glob pattern '{}': {}", pattern, details)
+            }
+            GlobError::Walk { base, error } => {
+                write!(
+                    f,
+                    "Failed to walk directory '{}': {}",
+                    base.display(),
+                    error
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for GlobError {}
 
 /// Expand a glob pattern relative to a base directory
 /// Returns a list of paths that match the pattern
@@ -9,10 +38,12 @@ pub fn expand_glob<F: FileSystem>(
     pattern: &str,
     base: &Path,
     fs: &F,
-) -> Result<Vec<PathBuf>, String> {
+) -> Result<Vec<PathBuf>, GlobError> {
     // Compile the glob pattern
-    let glob = Glob::new(pattern)
-        .map_err(|e| format!("Invalid glob pattern '{}': {}", pattern, e))?;
+    let glob = Glob::new(pattern).map_err(|e| GlobError::InvalidPattern {
+        pattern: pattern.to_string(),
+        details: e.to_string(),
+    })?;
     let matcher = glob.compile_matcher();
 
     // Walk the directory and collect matching paths
@@ -27,7 +58,10 @@ pub fn expand_glob<F: FileSystem>(
             }
             false
         })
-        .map_err(|e| format!("Failed to walk directory: {}", e))?;
+        .map_err(|error| GlobError::Walk {
+            base: base.to_path_buf(),
+            error,
+        })?;
 
     Ok(matches)
 }
@@ -50,7 +84,10 @@ mod tests {
         fs.add_file(base.join("tests/test.rs"), "content");
 
         let matches = expand_glob("src/*.rs", &base, &fs).expect("should expand glob");
-        let mut paths: Vec<_> = matches.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+        let mut paths: Vec<_> = matches
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
         paths.sort();
 
         assert_eq!(
@@ -68,10 +105,10 @@ mod tests {
         let fs = MockFileSystem::new();
 
         let err = expand_glob("[", base, &fs).expect_err("invalid glob should error");
-        assert!(
-            err.contains("Invalid glob pattern '['"),
-            "unexpected error message: {err}"
-        );
+        match err {
+            GlobError::InvalidPattern { pattern, .. } => assert_eq!(pattern, "["),
+            other => panic!("unexpected error variant: {other:?}"),
+        }
     }
 
     struct ErrorFs {
@@ -127,10 +164,12 @@ mod tests {
         let fs = ErrorFs::new();
 
         let err = expand_glob("*.rs", base, &fs).expect_err("walk_dir error should surface");
-        assert!(
-            err.contains("Failed to walk directory"),
-            "unexpected error message: {err}"
-        );
+        match err {
+            GlobError::Walk { error, .. } => {
+                assert_eq!(error.kind(), io::ErrorKind::Other);
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
         assert!(fs.read_error_emitted.get());
     }
 }

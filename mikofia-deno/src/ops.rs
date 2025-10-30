@@ -4,10 +4,7 @@ use std::path::{Path, PathBuf};
 /// Maximum file size that can be read (10MB)
 const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
-extension!(
-    mikofia_ops,
-    ops = [op_read_file, op_read_json, op_exists],
-);
+extension!(mikofia_ops, ops = [op_read_file, op_read_json, op_exists],);
 
 /// Initialize the mikofia ops extension
 pub fn init_ops() -> deno_core::Extension {
@@ -66,11 +63,7 @@ fn op_exists(#[string] path: &str) -> u32 {
         return 0;
     }
 
-    if Path::new(path).exists() {
-        1
-    } else {
-        0
-    }
+    if Path::new(path).exists() { 1 } else { 0 }
 }
 
 /// Validate that the path is within allowed boundaries
