@@ -1,6 +1,6 @@
 mod engine;
 mod fs;
-mod glob;
+pub mod glob;
 mod pipeline;
 mod reporter;
 mod types;

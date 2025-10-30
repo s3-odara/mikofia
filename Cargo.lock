@@ -4157,6 +4157,7 @@ dependencies = [
  "anyhow",
  "deno_core",
  "deno_runtime",
+ "globset",
  "mikofia",
  "serde",
  "serde_json",

@@ -61,21 +61,53 @@ async fn main() {
         process::exit(2);
     }
 
-    // Load config file based on extension
-    let config = match load_config(&config_path).await {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("❌ Failed to load config: {}", e);
-            process::exit(2);
-        }
-    };
-
+    // Load config file and run checks based on extension
     println!("🚀 Running mikofia check...\n");
     println!("📁 Directory: {}", check_dir.display());
     println!("⚙️  Config: {}\n", config_path.display());
 
-    // Run validation
-    let violations = mikofia::check(&config.nodes, &check_dir);
+    let violations = match config_path.extension().and_then(|s| s.to_str()) {
+        Some("js") => {
+            // Load JavaScript config with custom rules
+            let mut runtime = match mikofia_deno::DenoRuntime::new() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    eprintln!("❌ Failed to initialize Deno runtime: {}", e);
+                    process::exit(2);
+                }
+            };
+
+            let (config, rules_map) = match runtime.load_config_with_rules(&config_path).await {
+                Ok(result) => result,
+                Err(e) => {
+                    eprintln!("❌ Failed to load config: {}", e);
+                    process::exit(2);
+                }
+            };
+
+            // Run checks with JavaScript rules
+            match mikofia_deno::check_with_javascript_rules(config, &check_dir, rules_map, &mut runtime).await {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("❌ Failed to run checks: {}", e);
+                    process::exit(2);
+                }
+            }
+        }
+        _ => {
+            // Load JSON config
+            let config = match load_config(&config_path).await {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("❌ Failed to load config: {}", e);
+                    process::exit(2);
+                }
+            };
+
+            // Run standard checks
+            mikofia::check(&config.nodes, &check_dir)
+        }
+    };
 
     // Convert violations to results and report
     let results = mikofia::violations_to_results(&violations);

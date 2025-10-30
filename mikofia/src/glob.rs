@@ -5,7 +5,7 @@ use crate::fs::FileSystem;
 
 /// Expand a glob pattern relative to a base directory
 /// Returns a list of paths that match the pattern
-pub(crate) fn expand_glob<F: FileSystem>(
+pub fn expand_glob<F: FileSystem>(
     pattern: &str,
     base: &Path,
     fs: &F,

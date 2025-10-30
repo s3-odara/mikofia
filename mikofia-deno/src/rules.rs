@@ -39,6 +39,26 @@ impl JavaScriptRuleHandle {
     }
 }
 
+use serde::{Deserialize, Serialize};
+
+/// Lightweight violation from JavaScript (without path)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct JsViolation {
+    key: String,
+    message: String,
+    #[serde(default)]
+    path: Option<String>,
+}
+
+/// JavaScript rule result (uses JsViolation)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+enum JsRuleResult {
+    Pass,
+    Fail { violation: JsViolation },
+    Skip { reason: String },
+}
+
 /// Convert a JavaScript return value to RuleResult
 pub fn js_value_to_rule_result(
     scope: &mut v8::HandleScope,
@@ -46,13 +66,29 @@ pub fn js_value_to_rule_result(
 ) -> Result<RuleResult, Box<dyn std::error::Error + Send + Sync>> {
     use deno_core::serde_v8;
 
-    // Try to deserialize as RuleResult
+    // Try to deserialize as JsRuleResult
     // The JavaScript should return an object like:
     // { type: "pass" }
     // { type: "fail", violation: { key: "...", message: "..." } }
     // { type: "skip", reason: "..." }
 
-    let result: RuleResult = serde_v8::from_v8(scope, value)?;
+    let js_result: JsRuleResult = serde_v8::from_v8(scope, value)?;
+
+    // Convert JsRuleResult to RuleResult
+    let result = match js_result {
+        JsRuleResult::Pass => RuleResult::Pass,
+        JsRuleResult::Skip { reason } => RuleResult::Skip { reason },
+        JsRuleResult::Fail { violation } => {
+            RuleResult::Fail {
+                violation: mikofia::Violation::new(
+                    violation.key,
+                    violation.path.unwrap_or_default(), // Path will be set by caller
+                    violation.message,
+                ),
+            }
+        }
+    };
+
     Ok(result)
 }
 

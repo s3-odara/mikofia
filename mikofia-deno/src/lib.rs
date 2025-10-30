@@ -18,6 +18,134 @@ pub async fn load_javascript_config(
     runtime.load_config(path).await
 }
 
+/// Check with JavaScript custom rules
+pub async fn check_with_javascript_rules(
+    config: Config,
+    root: &Path,
+    rules_map: Vec<(String, Vec<JavaScriptRuleHandle>)>,
+    runtime: &mut DenoRuntime,
+) -> Result<Vec<mikofia::Violation>, Box<dyn std::error::Error + Send + Sync>> {
+    use mikofia::{check, RealFileSystem};
+
+    // 1. Run standard checks
+    let mut violations = check(&config.nodes, root);
+
+    // 2. Run JavaScript custom rules
+    let fs = RealFileSystem;
+
+    for (pattern, rules) in rules_map {
+        // Find matching files for this pattern
+        let matched_paths = find_matching_paths(root, &pattern, &fs)?;
+
+        for path in matched_paths {
+            // Build evaluation context
+            let ctx = build_evaluation_context(&path, &fs)?;
+
+            // Execute each rule
+            for rule in &rules {
+                match runtime.call_rule(rule.function(), &ctx).await {
+                    Ok(mikofia::RuleResult::Fail { mut violation }) => {
+                        // Set the path if not already set by the rule
+                        if violation.path.is_empty() {
+                            violation.path = path.to_string_lossy().to_string();
+                        }
+                        violations.push(violation);
+                    }
+                    Ok(mikofia::RuleResult::Pass) => {}
+                    Ok(mikofia::RuleResult::Skip { .. }) => {}
+                    Err(e) => {
+                        violations.push(mikofia::Violation::new(
+                            "rule-execution-error",
+                            path.to_string_lossy().to_string(),
+                            format!("Failed to execute rule: {}", e),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(violations)
+}
+
+use std::path::PathBuf;
+
+/// Find files matching a pattern
+fn find_matching_paths(
+    root: &Path,
+    pattern: &str,
+    fs: &impl mikofia::FileSystem,
+) -> Result<Vec<PathBuf>, Box<dyn std::error::Error + Send + Sync>> {
+    // If pattern contains glob characters, use glob expansion
+    if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+        // Use mikofia's glob expansion which is already optimized
+        match mikofia::glob::expand_glob(pattern, root, fs) {
+            Ok(paths) => Ok(paths),
+            Err(_) => Ok(vec![]), // Return empty if glob expansion fails
+        }
+    } else {
+        // Literal path
+        let full_path = root.join(pattern);
+        if fs.exists(&full_path) {
+            Ok(vec![full_path])
+        } else {
+            Ok(vec![])
+        }
+    }
+}
+
+/// Build evaluation context for a path
+fn build_evaluation_context(
+    path: &Path,
+    fs: &impl mikofia::FileSystem,
+) -> Result<mikofia::EvaluationContext, Box<dyn std::error::Error + Send + Sync>> {
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+
+    let extension = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_string());
+
+    let parent = path.parent().and_then(|parent_path| {
+        parent_path.file_name().and_then(|parent_name| {
+            parent_name.to_str().map(|name_str| mikofia::ParentInfo {
+                path: parent_path.to_string_lossy().to_string(),
+                name: name_str.to_string(),
+            })
+        })
+    });
+
+    let siblings = if let Some(parent_path) = path.parent() {
+        fs.read_dir(parent_path)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|sibling_name| sibling_name != &name)
+            .map(|sibling_name| {
+                let sibling_path = parent_path.join(&sibling_name);
+                mikofia::SiblingInfo {
+                    name: sibling_name,
+                    is_file: !fs.is_dir(&sibling_path),
+                    is_directory: fs.is_dir(&sibling_path),
+                }
+            })
+            .collect()
+    } else {
+        vec![]
+    };
+
+    Ok(mikofia::EvaluationContext {
+        path: path.to_string_lossy().to_string(),
+        name,
+        extension,
+        parent,
+        siblings,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
