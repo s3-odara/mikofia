@@ -8,7 +8,7 @@ pub use rules::{JavaScriptRuleHandle, js_value_to_rule_result};
 pub use runtime::DenoRuntime;
 
 use mikofia::Config;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 /// Load a JavaScript configuration file
 pub async fn load_javascript_config(
@@ -68,8 +68,6 @@ pub async fn check_with_javascript_rules(
     Ok(violations)
 }
 
-use std::path::PathBuf;
-
 /// Find files matching a pattern
 fn find_matching_paths(
     root: &Path,
@@ -78,6 +76,19 @@ fn find_matching_paths(
 ) -> Result<Vec<PathBuf>, Box<dyn std::error::Error + Send + Sync>> {
     // If pattern contains glob characters, use glob expansion
     if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+        if let Some((literal_prefix, remainder_pattern)) = split_literal_prefix(pattern) {
+            let base_dir = root.join(&literal_prefix);
+
+            if !fs.exists(&base_dir) || !fs.is_dir(&base_dir) {
+                return Ok(vec![]);
+            }
+
+            return match mikofia::glob::expand_glob(&remainder_pattern, &base_dir, fs) {
+                Ok(paths) => Ok(paths),
+                Err(_) => Ok(vec![]),
+            };
+        }
+
         // Use mikofia's glob expansion which is already optimized
         match mikofia::glob::expand_glob(pattern, root, fs) {
             Ok(paths) => Ok(paths),
@@ -91,6 +102,49 @@ fn find_matching_paths(
         } else {
             Ok(vec![])
         }
+    }
+}
+
+fn split_literal_prefix(pattern: &str) -> Option<(PathBuf, String)> {
+    use globset::{GlobBuilder, escape};
+
+    let mut literal_prefix = PathBuf::new();
+    let mut remainder: Vec<String> = Vec::new();
+    let mut glob_found = false;
+
+    for component in Path::new(pattern).components() {
+        let component_str = match component {
+            Component::Normal(segment) => segment.to_string_lossy().into_owned(),
+            Component::CurDir => ".".to_string(),
+            Component::ParentDir => "..".to_string(),
+            _ => return None,
+        };
+
+        let is_glob = GlobBuilder::new(&component_str)
+            .literal_separator(true)
+            .build()
+            .map(|parsed| {
+                let escaped = escape(&component_str);
+                GlobBuilder::new(&escaped)
+                    .literal_separator(true)
+                    .build()
+                    .map(|literal| parsed.regex() != literal.regex())
+                    .unwrap_or(true)
+            })
+            .unwrap_or(true);
+
+        if !glob_found && !is_glob {
+            literal_prefix.push(&component_str);
+        } else {
+            glob_found = true;
+            remainder.push(component_str);
+        }
+    }
+
+    if literal_prefix.as_os_str().is_empty() || remainder.is_empty() {
+        None
+    } else {
+        Some((literal_prefix, remainder.join("/")))
     }
 }
 
