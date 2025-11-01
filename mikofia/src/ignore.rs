@@ -5,6 +5,7 @@ use std::path::Path;
 #[derive(Debug, Clone)]
 pub struct IgnoreMatcher {
     glob_set: GlobSet,
+    patterns: Vec<String>,
 }
 
 impl IgnoreMatcher {
@@ -32,14 +33,34 @@ impl IgnoreMatcher {
             .build()
             .map_err(|e| format!("Failed to build ignore matcher: {}", e))?;
 
-        Ok(Self { glob_set })
+        Ok(Self {
+            glob_set,
+            patterns: patterns.to_vec(),
+        })
     }
 
     /// Create an empty IgnoreMatcher that matches nothing
     pub fn empty() -> Self {
         Self {
             glob_set: GlobSetBuilder::new().build().unwrap(),
+            patterns: Vec::new(),
         }
+    }
+
+    /// Create a new IgnoreMatcher from multiple pattern sets
+    /// This combines all pattern sets into a single matcher
+    pub fn from_multiple(pattern_sets: &[&[String]]) -> Result<Self, String> {
+        let all_patterns: Vec<String> = pattern_sets
+            .iter()
+            .flat_map(|set| set.iter().cloned())
+            .collect();
+
+        Self::new(&all_patterns)
+    }
+
+    /// Get the patterns used by this matcher
+    pub fn patterns(&self) -> &[String] {
+        &self.patterns
     }
 
     /// Check if a path should be ignored
@@ -125,5 +146,55 @@ mod tests {
         assert!(matcher.is_ignored_str("app.log"));
         assert!(matcher.is_ignored_str("error.log"));
         assert!(!matcher.is_ignored_str("main.rs"));
+    }
+
+    #[test]
+    fn test_from_multiple_combines_patterns() {
+        let global_patterns = vec!["node_modules".to_string(), "target".to_string()];
+        let local_patterns = vec!["*.log".to_string(), "temp".to_string()];
+
+        let matcher =
+            IgnoreMatcher::from_multiple(&[&global_patterns, &local_patterns]).unwrap();
+
+        // Global patterns should work
+        assert!(matcher.is_ignored(Path::new("node_modules")));
+        assert!(matcher.is_ignored(Path::new("target")));
+
+        // Local patterns should work
+        assert!(matcher.is_ignored(Path::new("app.log")));
+        assert!(matcher.is_ignored(Path::new("temp")));
+
+        // Non-matching paths
+        assert!(!matcher.is_ignored(Path::new("src")));
+        assert!(!matcher.is_ignored(Path::new("main.rs")));
+    }
+
+    #[test]
+    fn test_from_multiple_with_empty_sets() {
+        let patterns1 = vec!["*.log".to_string()];
+        let patterns2: Vec<String> = vec![];
+
+        let matcher = IgnoreMatcher::from_multiple(&[&patterns1, &patterns2]).unwrap();
+
+        assert!(matcher.is_ignored(Path::new("app.log")));
+        assert!(!matcher.is_ignored(Path::new("main.rs")));
+    }
+
+    #[test]
+    fn test_from_multiple_all_empty() {
+        let patterns1: Vec<String> = vec![];
+        let patterns2: Vec<String> = vec![];
+
+        let matcher = IgnoreMatcher::from_multiple(&[&patterns1, &patterns2]).unwrap();
+
+        assert!(!matcher.is_ignored(Path::new("anything")));
+    }
+
+    #[test]
+    fn test_patterns_method_returns_original_patterns() {
+        let patterns = vec!["*.log".to_string(), "node_modules".to_string()];
+        let matcher = IgnoreMatcher::new(&patterns).unwrap();
+
+        assert_eq!(matcher.patterns(), &patterns);
     }
 }

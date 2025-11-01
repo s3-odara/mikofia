@@ -21,6 +21,9 @@ pub struct Node {
     #[serde(default)]
     pub strict: Option<bool>,
 
+    #[serde(default)]
+    pub ignore: Vec<String>,
+
     #[serde(skip)]
     pub rules: Vec<RuleHandle>,
 }
@@ -75,8 +78,61 @@ impl Config {
         let content = fs.read_to_string(path)?;
         let config: Config = serde_json::from_str(&content)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        // Validate all ignore patterns in the config
+        config.validate_ignore_patterns()?;
+
         Ok(config)
     }
+
+    /// Validate all ignore patterns in the configuration
+    fn validate_ignore_patterns(&self) -> io::Result<()> {
+        use crate::ignore::IgnoreMatcher;
+
+        // Validate global ignore patterns
+        if !self.ignore.is_empty() {
+            IgnoreMatcher::new(&self.ignore).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Invalid global ignore pattern: {}", e),
+                )
+            })?;
+        }
+
+        // Validate ignore patterns in all nodes
+        for node in &self.nodes {
+            validate_node_ignore_patterns(node, &node.path)?;
+        }
+
+        Ok(())
+    }
+}
+
+/// Recursively validate ignore patterns in a node and its children
+fn validate_node_ignore_patterns(node: &Node, node_path: &str) -> io::Result<()> {
+    use crate::ignore::IgnoreMatcher;
+
+    // Validate this node's ignore patterns
+    if !node.ignore.is_empty() {
+        IgnoreMatcher::new(&node.ignore).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Invalid ignore pattern in node '{}': {}", node_path, e),
+            )
+        })?;
+    }
+
+    // Recursively validate children
+    for child in &node.children {
+        let child_path = if node_path.is_empty() {
+            child.path.clone()
+        } else {
+            format!("{}/{}", node_path, child.path)
+        };
+        validate_node_ignore_patterns(child, &child_path)?;
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

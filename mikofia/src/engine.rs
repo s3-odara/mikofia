@@ -30,10 +30,71 @@ pub fn check_with_fs_and_ignore<F: FileSystem>(
     fs: &F,
     ignore: &IgnoreMatcher,
 ) -> Vec<Violation> {
+    // Extract global ignore patterns to pass to child nodes
+    let global_patterns = ignore.patterns();
+
     nodes
         .iter()
-        .flat_map(|node| check_node(node, root, root, fs, ignore))
+        .flat_map(|node| check_node_with_patterns(node, root, root, fs, global_patterns))
         .collect()
+}
+
+fn check_node_with_patterns<F: FileSystem>(
+    node: &Node,
+    workspace_root: &Path,
+    root: &Path,
+    fs: &F,
+    parent_patterns: &[String],
+) -> Vec<Violation> {
+    // Calculate this node's relative path from workspace_root
+    // This is used to prefix node-level ignore patterns
+    let node_relative_path = if root == workspace_root {
+        // Top-level node: use node.path directly
+        PathBuf::from(&node.path)
+    } else {
+        // Nested node: combine root's relative path with node.path
+        match root.strip_prefix(workspace_root) {
+            Ok(root_relative) => root_relative.join(&node.path),
+            Err(_) => PathBuf::from(&node.path),
+        }
+    };
+
+    // Prefix node's ignore patterns with its relative path from workspace_root
+    // This ensures patterns are scoped to the node's directory
+    // Example: apps/web node with ignore: ["dist"] becomes "apps/web/dist"
+    let prefixed_node_patterns: Vec<String> = node
+        .ignore
+        .iter()
+        .map(|pattern| {
+            let prefixed_path = node_relative_path.join(pattern);
+            prefixed_path.to_string_lossy().into_owned()
+        })
+        .collect();
+
+    // Combine parent patterns with prefixed node patterns
+    let pattern_sets: Vec<&[String]> = prefixed_node_patterns
+        .is_empty()
+        .then(|| vec![parent_patterns])
+        .unwrap_or_else(|| vec![parent_patterns, &prefixed_node_patterns]);
+
+    let combined_matcher = match IgnoreMatcher::from_multiple(&pattern_sets) {
+        Ok(matcher) => matcher,
+        Err(_e) => {
+            // This should not happen because patterns are validated at config load time
+            // If it does, create an empty matcher
+            IgnoreMatcher::empty()
+        }
+    };
+
+    // Build combined patterns for children
+    // Use prefixed patterns so children inherit the correct scope
+    let child_patterns: Vec<String> = parent_patterns
+        .iter()
+        .cloned()
+        .chain(prefixed_node_patterns.iter().cloned())
+        .collect();
+
+    check_node(node, workspace_root, root, fs, &combined_matcher, &child_patterns)
 }
 
 fn check_node<F: FileSystem>(
@@ -42,10 +103,11 @@ fn check_node<F: FileSystem>(
     root: &Path,
     fs: &F,
     ignore: &IgnoreMatcher,
+    patterns_for_children: &[String],
 ) -> Vec<Violation> {
     // Check if path is a glob pattern
     if node.is_glob_pattern() {
-        return check_glob_node(node, workspace_root, root, fs, ignore);
+        return check_glob_node(node, workspace_root, root, fs, ignore, patterns_for_children);
     }
 
     // Regular path checking
@@ -55,7 +117,9 @@ fn check_node<F: FileSystem>(
     let mut violations = CheckPipeline::new(node, full_path.clone(), exists)
         .check_existence()
         .check_kind(fs)
-        .check_directory_with(|n, p| check_directory_violations(n, p, workspace_root, fs, ignore))
+        .check_directory_with(|n, p| {
+            check_directory_violations(n, p, workspace_root, fs, ignore, patterns_for_children)
+        })
         .violations();
 
     // Execute custom rules if the path exists
@@ -73,6 +137,7 @@ fn check_glob_node<F: FileSystem>(
     root: &Path,
     fs: &F,
     ignore: &IgnoreMatcher,
+    patterns_for_children: &[String],
 ) -> Vec<Violation> {
     // Expand glob pattern
     let matched_paths = match glob::expand_glob(&node.path, root, fs) {
@@ -133,7 +198,7 @@ fn check_glob_node<F: FileSystem>(
                 .check_existence()
                 .check_kind(fs)
                 .check_directory_with(|n, p| {
-                    check_directory_violations(n, p, workspace_root, fs, ignore)
+                    check_directory_violations(n, p, workspace_root, fs, ignore, patterns_for_children)
                 })
                 .violations()
                 .into_iter()
@@ -153,9 +218,11 @@ fn check_directory_violations<F: FileSystem>(
     workspace_root: &Path,
     fs: &F,
     ignore: &IgnoreMatcher,
+    patterns_for_children: &[String],
 ) -> Vec<Violation> {
     let strict_violations = check_strict(node, dir_path, workspace_root, fs, ignore);
-    let children_violations = check_children(node, dir_path, workspace_root, fs, ignore);
+    let children_violations =
+        check_children(node, dir_path, workspace_root, fs, patterns_for_children);
 
     strict_violations
         .into_iter()
@@ -168,11 +235,13 @@ fn check_children<F: FileSystem>(
     dir_path: &Path,
     workspace_root: &Path,
     fs: &F,
-    ignore: &IgnoreMatcher,
+    patterns_for_children: &[String],
 ) -> Vec<Violation> {
     node.children
         .iter()
-        .flat_map(|child| check_node(child, workspace_root, dir_path, fs, ignore))
+        .flat_map(|child| {
+            check_node_with_patterns(child, workspace_root, dir_path, fs, patterns_for_children)
+        })
         .collect()
 }
 

@@ -127,6 +127,15 @@ export interface Node {
   strict?: boolean | null;
 
   /**
+   * Glob patterns to ignore within this node's scope.
+   * These patterns are combined with parent and global ignore patterns.
+   * Patterns match recursively (including subdirectories), similar to .gitignore behavior.
+   * @default []
+   * @example ["*.test.tsx", "*.log", "temp"]
+   */
+  ignore?: string[];
+
+  /**
    * Custom validation rules to apply to this node.
    * @default []
    */

@@ -45,6 +45,7 @@ mod tests {
             kind: NodeKind::Any,
             children: vec![],
             strict: None,
+            ignore: vec![],
             rules: vec![],
         }];
         let violations = check(&nodes, &PathBuf::from("."));
@@ -68,6 +69,7 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
+            ignore: vec![],
             rules: vec![],
         }];
 
@@ -89,6 +91,7 @@ mod tests {
             kind: NodeKind::Any,
             children: vec![],
             strict: None,
+            ignore: vec![],
             rules: vec![],
         }];
 
@@ -119,6 +122,7 @@ mod tests {
                     kind: NodeKind::File,
                     children: vec![],
                     strict: None,
+                    ignore: vec![],
                     rules: vec![],
                 },
                 Node {
@@ -127,10 +131,12 @@ mod tests {
                     kind: NodeKind::File,
                     children: vec![],
                     strict: None,
+                    ignore: vec![],
                     rules: vec![],
                 },
             ],
             strict: Some(true),
+            ignore: vec![],
             rules: vec![],
         }];
 
@@ -139,6 +145,102 @@ mod tests {
             eprintln!("Violations: {:?}", violations);
         }
         assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn test_node_level_ignore_scoped_to_node() {
+        let root = mock_root();
+        let mut mock_fs = MockFileSystem::new();
+        mock_fs.add_dir(root.join("apps"));
+        mock_fs.add_dir(root.join("apps/web"));
+        mock_fs.add_dir(root.join("apps/web/src"));
+        mock_fs.add_dir(root.join("apps/web/dist"));
+        mock_fs.add_file(root.join("apps/web/src/index.ts"), "export {};");
+
+        let nodes = vec![Node {
+            path: "apps".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::Directory,
+            children: vec![Node {
+                path: "web".to_string(),
+                existence: Existence::Required,
+                kind: NodeKind::Directory,
+                children: vec![Node {
+                    path: "src".to_string(),
+                    existence: Existence::Required,
+                    kind: NodeKind::Directory,
+                    children: vec![Node {
+                        path: "index.ts".to_string(),
+                        existence: Existence::Required,
+                        kind: NodeKind::File,
+                        children: vec![],
+                        strict: None,
+                        ignore: vec![],
+                        rules: vec![],
+                    }],
+                    strict: Some(true),
+                    ignore: vec![],
+                    rules: vec![],
+                }],
+                strict: Some(true),
+                ignore: vec!["dist".to_string()],
+                rules: vec![],
+            }],
+            strict: Some(true),
+            ignore: vec![],
+            rules: vec![],
+        }];
+
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        assert!(
+            violations.is_empty(),
+            "unexpected violations when node-level ignore should exclude dist: {:?}",
+            violations
+        );
+    }
+
+    #[test]
+    fn test_node_level_ignore_with_globbed_directory() {
+        let root = mock_root();
+        let mut mock_fs = MockFileSystem::new();
+        mock_fs.add_dir(root.join("apps"));
+        mock_fs.add_dir(root.join("apps/app1"));
+        mock_fs.add_dir(root.join("apps/app1/src"));
+        mock_fs.add_dir(root.join("apps/app1/dist"));
+        mock_fs.add_file(root.join("apps/app1/src/index.tsx"), "export {};");
+
+        let nodes = vec![Node {
+            path: "apps/*".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::Directory,
+            children: vec![Node {
+                path: "src".to_string(),
+                existence: Existence::Required,
+                kind: NodeKind::Directory,
+                children: vec![Node {
+                    path: "index.tsx".to_string(),
+                    existence: Existence::Required,
+                    kind: NodeKind::File,
+                    children: vec![],
+                    strict: None,
+                    ignore: vec![],
+                    rules: vec![],
+                }],
+                strict: Some(true),
+                ignore: vec![],
+                rules: vec![],
+            }],
+            strict: Some(true),
+            ignore: vec!["dist".to_string()],
+            rules: vec![],
+        }];
+
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        assert!(
+            violations.is_empty(),
+            "unexpected violations when globbed node-level ignore should exclude dist: {:?}",
+            violations
+        );
     }
 
     #[test]
@@ -166,6 +268,7 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
+            ignore: vec![],
             rules: vec![],
         };
         assert!(node.is_glob_pattern());
@@ -176,6 +279,7 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
+            ignore: vec![],
             rules: vec![],
         };
         assert!(node.is_glob_pattern());
@@ -186,6 +290,7 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
+            ignore: vec![],
             rules: vec![],
         };
         assert!(node.is_glob_pattern());
@@ -200,6 +305,7 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
+            ignore: vec![],
             rules: vec![],
         };
         assert!(node.is_glob_pattern());
@@ -214,6 +320,7 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
+            ignore: vec![],
             rules: vec![],
         };
         assert!(node.is_glob_pattern());
@@ -228,6 +335,7 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
+            ignore: vec![],
             rules: vec![],
         };
         assert!(!node.is_glob_pattern());
@@ -238,6 +346,7 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
+            ignore: vec![],
             rules: vec![],
         };
         assert!(!node.is_glob_pattern());
@@ -248,6 +357,7 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
+            ignore: vec![],
             rules: vec![],
         };
         assert!(!node.is_glob_pattern());
@@ -265,6 +375,7 @@ mod tests {
             kind: NodeKind::Any,
             children: vec![],
             strict: None,
+            ignore: vec![],
             rules: vec![],
         }];
 
@@ -286,6 +397,7 @@ mod tests {
             kind: NodeKind::Directory,
             children: vec![],
             strict: None,
+            ignore: vec![],
             rules: vec![],
         }];
 
@@ -310,6 +422,7 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
+            ignore: vec![],
             rules: vec![],
         }];
 
@@ -341,6 +454,7 @@ mod tests {
                     kind: NodeKind::File,
                     children: vec![],
                     strict: None,
+                    ignore: vec![],
                     rules: vec![],
                 },
                 Node {
@@ -349,10 +463,12 @@ mod tests {
                     kind: NodeKind::File,
                     children: vec![],
                     strict: None,
+                    ignore: vec![],
                     rules: vec![],
                 },
             ],
             strict: Some(true),
+            ignore: vec![],
             rules: vec![],
         }];
 
@@ -378,9 +494,11 @@ mod tests {
                 kind: NodeKind::File,
                 children: vec![],
                 strict: None,
+                ignore: vec![],
                 rules: vec![],
             }],
             strict: Some(true),
+            ignore: vec![],
             rules: vec![],
         }];
 
@@ -410,6 +528,7 @@ mod tests {
             kind: NodeKind::Directory,
             children: vec![],
             strict: Some(true),
+            ignore: vec![],
             rules: vec![],
         }];
 
@@ -439,9 +558,11 @@ mod tests {
                 kind: NodeKind::File,
                 children: vec![],
                 strict: None,
+                ignore: vec![],
                 rules: vec![],
             }],
             strict: Some(true),
+            ignore: vec![],
             rules: vec![],
         }];
 
@@ -474,6 +595,7 @@ mod tests {
                     kind: NodeKind::File,
                     children: vec![],
                     strict: None,
+                    ignore: vec![],
                     rules: vec![],
                 },
                 Node {
@@ -482,10 +604,12 @@ mod tests {
                     kind: NodeKind::File,
                     children: vec![],
                     strict: None,
+                    ignore: vec![],
                     rules: vec![],
                 },
             ],
             strict: Some(true),
+            ignore: vec![],
             rules: vec![],
         }];
 
@@ -512,6 +636,7 @@ mod tests {
             kind: NodeKind::Directory,
             children: vec![],
             strict: None,
+            ignore: vec![],
             rules: vec![],
         }];
 
@@ -539,6 +664,7 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
+            ignore: vec![],
             rules: vec![],
         }];
 
@@ -566,6 +692,7 @@ mod tests {
             kind: NodeKind::File,
             children: vec![],
             strict: None,
+            ignore: vec![],
             rules: vec![],
         }];
 
@@ -634,6 +761,7 @@ mod tests {
             kind: NodeKind::Directory,
             children: vec![],
             strict: Some(true),
+            ignore: vec![],
             rules: vec![],
         }];
 
@@ -660,6 +788,7 @@ mod tests {
             kind: NodeKind::Directory,
             children: vec![],
             strict: Some(true),
+            ignore: vec![],
             rules: vec![],
         }];
 
@@ -689,6 +818,7 @@ mod tests {
             kind: NodeKind::Any,
             children: vec![],
             strict: None,
+            ignore: vec![],
             rules: vec![],
         }];
 
@@ -700,6 +830,262 @@ mod tests {
             violation.message.contains("insufficient permissions"),
             "unexpected message: {}",
             violation.message
+        );
+    }
+
+    #[test]
+    fn test_node_level_ignore_scoped_to_node_directory() {
+        let root = mock_root();
+        let mut mock_fs = MockFileSystem::new();
+
+        // Create directory structure:
+        // apps/
+        //   web/
+        //     dist/
+        //       bundle.js
+        //     src/
+        //       index.ts
+        //   api/
+        //     dist/
+        //       server.js
+        mock_fs.add_dir(root.join("apps"));
+        mock_fs.add_dir(root.join("apps/web"));
+        mock_fs.add_dir(root.join("apps/web/dist"));
+        mock_fs.add_file(root.join("apps/web/dist/bundle.js"), "// bundle");
+        mock_fs.add_dir(root.join("apps/web/src"));
+        mock_fs.add_file(root.join("apps/web/src/index.ts"), "// source");
+        mock_fs.add_dir(root.join("apps/api"));
+        mock_fs.add_dir(root.join("apps/api/dist"));
+        mock_fs.add_file(root.join("apps/api/dist/server.js"), "// server");
+
+        let nodes = vec![Node {
+            path: "apps".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::Directory,
+            children: vec![
+                Node {
+                    path: "web".to_string(),
+                    existence: Existence::Required,
+                    kind: NodeKind::Directory,
+                    children: vec![
+                        Node {
+                            path: "src".to_string(),
+                            existence: Existence::Required,
+                            kind: NodeKind::Directory,
+                            children: vec![],
+                            strict: None,
+                            ignore: vec![],
+                            rules: vec![],
+                        },
+                    ],
+                    strict: Some(true),
+                    // This should ignore apps/web/dist but NOT apps/api/dist
+                    ignore: vec!["dist".to_string()],
+                    rules: vec![],
+                },
+                Node {
+                    path: "api".to_string(),
+                    existence: Existence::Required,
+                    kind: NodeKind::Directory,
+                    children: vec![],
+                    strict: Some(true),
+                    ignore: vec![],
+                    rules: vec![],
+                },
+            ],
+            strict: None,
+            ignore: vec![],
+            rules: vec![],
+        }];
+
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
+
+        // apps/web/dist should be ignored due to node-level ignore
+        // apps/api/dist should be reported as unlisted-child
+        assert_eq!(violations.len(), 1, "expected one violation for apps/api/dist");
+        assert_eq!(violations[0].key, "unlisted-child");
+        assert!(
+            violations[0].path.contains("apps/api/dist"),
+            "expected violation for apps/api/dist, got: {}",
+            violations[0].path
+        );
+    }
+
+    #[test]
+    fn test_node_level_ignore_with_glob_pattern() {
+        let root = mock_root();
+        let mut mock_fs = MockFileSystem::new();
+
+        // Create directory structure:
+        // src/
+        //   components/
+        //     Button.tsx
+        //     Button.test.tsx
+        //     Input.tsx
+        //     Input.test.tsx
+        mock_fs.add_dir(root.join("src"));
+        mock_fs.add_dir(root.join("src/components"));
+        mock_fs.add_file(root.join("src/components/Button.tsx"), "export const Button");
+        mock_fs.add_file(root.join("src/components/Button.test.tsx"), "test(...)");
+        mock_fs.add_file(root.join("src/components/Input.tsx"), "export const Input");
+        mock_fs.add_file(root.join("src/components/Input.test.tsx"), "test(...)");
+
+        let nodes = vec![Node {
+            path: "src".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::Directory,
+            children: vec![Node {
+                path: "components".to_string(),
+                existence: Existence::Required,
+                kind: NodeKind::Directory,
+                children: vec![
+                    Node {
+                        path: "*.tsx".to_string(),
+                        existence: Existence::Optional,
+                        kind: NodeKind::File,
+                        children: vec![],
+                        strict: None,
+                        ignore: vec![],
+                        rules: vec![],
+                    },
+                ],
+                strict: Some(true),
+                // Ignore all test files in components directory
+                ignore: vec!["*.test.tsx".to_string()],
+                rules: vec![],
+            }],
+            strict: None,
+            ignore: vec![],
+            rules: vec![],
+        }];
+
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
+
+        // *.test.tsx files should be ignored, so no unlisted-child violations
+        assert!(
+            violations.is_empty(),
+            "expected no violations when test files are ignored, got: {violations:?}"
+        );
+    }
+
+    #[test]
+    fn test_node_level_ignore_inherits_from_parent() {
+        let root = mock_root();
+        let mut mock_fs = MockFileSystem::new();
+
+        // Create directory structure:
+        // project/
+        //   lib/
+        //     utils.ts
+        //     utils.test.ts
+        //   dist/
+        //     bundle.js
+        mock_fs.add_dir(root.join("project"));
+        mock_fs.add_dir(root.join("project/lib"));
+        mock_fs.add_file(root.join("project/lib/utils.ts"), "export const utils");
+        mock_fs.add_file(root.join("project/lib/utils.test.ts"), "test(...)");
+        mock_fs.add_dir(root.join("project/dist"));
+        mock_fs.add_file(root.join("project/dist/bundle.js"), "// bundle");
+
+        let nodes = vec![Node {
+            path: "project".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::Directory,
+            children: vec![Node {
+                path: "lib".to_string(),
+                existence: Existence::Required,
+                kind: NodeKind::Directory,
+                children: vec![
+                    Node {
+                        path: "utils.ts".to_string(),
+                        existence: Existence::Required,
+                        kind: NodeKind::File,
+                        children: vec![],
+                        strict: None,
+                        ignore: vec![],
+                        rules: vec![],
+                    },
+                ],
+                strict: Some(true),
+                // This should ignore *.test.ts in lib directory
+                ignore: vec!["*.test.ts".to_string()],
+                rules: vec![],
+            }],
+            strict: Some(true),
+            // This should ignore dist in project directory
+            ignore: vec!["dist".to_string()],
+            rules: vec![],
+        }];
+
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
+
+        // Both dist and utils.test.ts should be ignored
+        assert!(
+            violations.is_empty(),
+            "expected no violations when both parent and child ignore patterns apply, got: {violations:?}"
+        );
+    }
+
+    #[test]
+    fn test_nested_node_ignore_correctly_prefixed() {
+        let root = mock_root();
+        let mut mock_fs = MockFileSystem::new();
+
+        // Create directory structure:
+        // packages/
+        //   core/
+        //     lib/
+        //       temp/
+        //         cache.txt
+        //       index.ts
+        mock_fs.add_dir(root.join("packages"));
+        mock_fs.add_dir(root.join("packages/core"));
+        mock_fs.add_dir(root.join("packages/core/lib"));
+        mock_fs.add_dir(root.join("packages/core/lib/temp"));
+        mock_fs.add_file(root.join("packages/core/lib/temp/cache.txt"), "cache");
+        mock_fs.add_file(root.join("packages/core/lib/index.ts"), "export *");
+
+        let nodes = vec![Node {
+            path: "packages".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::Directory,
+            children: vec![Node {
+                path: "core".to_string(),
+                existence: Existence::Required,
+                kind: NodeKind::Directory,
+                children: vec![Node {
+                    path: "lib".to_string(),
+                    existence: Existence::Required,
+                    kind: NodeKind::Directory,
+                    children: vec![Node {
+                        path: "index.ts".to_string(),
+                        existence: Existence::Required,
+                        kind: NodeKind::File,
+                        children: vec![],
+                        strict: None,
+                        ignore: vec![],
+                        rules: vec![],
+                    }],
+                    strict: Some(true),
+                    // This should ignore packages/core/lib/temp
+                    ignore: vec!["temp".to_string()],
+                    rules: vec![],
+                }],
+                strict: None,
+                ignore: vec![],
+                rules: vec![],
+            }],
+            strict: None,
+            ignore: vec![],
+            rules: vec![],
+        }];
+
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
+
+        // packages/core/lib/temp should be ignored
+        assert!(
+            violations.is_empty(),
+            "expected no violations when nested node ignore pattern is correctly prefixed, got: {violations:?}"
         );
     }
 }
