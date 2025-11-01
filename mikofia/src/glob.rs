@@ -1,4 +1,4 @@
-use globset::Glob;
+use globset::{Glob, GlobBuilder};
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -39,8 +39,8 @@ pub fn expand_glob<F: FileSystem>(
     base: &Path,
     fs: &F,
 ) -> Result<Vec<PathBuf>, GlobError> {
-    // Compile the glob pattern
-    let glob = Glob::new(pattern).map_err(|e| GlobError::InvalidPattern {
+    // Compile the glob pattern with literal separators so `*` does not cross directories
+    let glob = build_literal_glob(pattern).map_err(|e| GlobError::InvalidPattern {
         pattern: pattern.to_string(),
         details: e.to_string(),
     })?;
@@ -172,4 +172,26 @@ mod tests {
         }
         assert!(fs.read_error_emitted.get());
     }
+
+    #[test]
+    fn single_star_does_not_cross_directory_separator() {
+        let mut fs = MockFileSystem::new();
+        let base = PathBuf::from("/project");
+        fs.add_dir(base.clone());
+        fs.add_dir(base.join("subdir"));
+        fs.add_file(base.join("subdir/file.txt"), "content");
+        fs.add_file(base.join("subdir/nested/file.txt"), "content");
+
+        let glob = build_literal_glob("subdir/*").expect("should compile");
+        let matcher = glob.compile_matcher();
+        assert!(matcher.is_match("subdir/file.txt"));
+        assert!(!matcher.is_match("subdir/nested/file.txt"));
+    }
+}
+
+/// Build a glob pattern that treats path separators literally (similar to minimatch).
+pub fn build_literal_glob(pattern: &str) -> Result<Glob, globset::Error> {
+    GlobBuilder::new(pattern)
+        .literal_separator(true)
+        .build()
 }

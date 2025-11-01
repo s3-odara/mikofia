@@ -226,7 +226,7 @@ fn check_strict<F: FileSystem>(
         .iter()
         .filter(|child| child.is_glob_pattern())
         .filter_map(|child| {
-            globset::Glob::new(&child.path)
+            glob::build_literal_glob(&child.path)
                 .ok()
                 .map(|glob| (child.path.as_str(), glob.compile_matcher()))
         })

@@ -1,4 +1,4 @@
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use globset::{GlobSet, GlobSetBuilder};
 use std::path::Path;
 
 /// Matcher for ignore patterns
@@ -14,7 +14,7 @@ impl IgnoreMatcher {
             .iter()
             .try_fold(GlobSetBuilder::new(), |mut builder, pattern| {
                 // Add the pattern itself
-                let glob = Glob::new(pattern)
+                let glob = crate::glob::build_literal_glob(pattern)
                     .map_err(|e| format!("Invalid ignore pattern '{}': {}", pattern, e))?;
                 builder.add(glob);
 
@@ -22,7 +22,7 @@ impl IgnoreMatcher {
                 // This makes "node_modules" match both "node_modules" and "node_modules/**/*"
                 if !pattern.contains('*') && !pattern.contains('?') && !pattern.contains('[') {
                     let dir_pattern = format!("{}/**", pattern);
-                    if let Ok(dir_glob) = Glob::new(&dir_pattern) {
+                    if let Ok(dir_glob) = crate::glob::build_literal_glob(&dir_pattern) {
                         builder.add(dir_glob);
                     }
                 }
