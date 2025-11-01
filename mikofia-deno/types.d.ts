@@ -137,6 +137,14 @@ export interface Node {
  * Main configuration object for mikofia.
  */
 export interface Config {
+  /**
+   * Glob patterns for files and directories to ignore.
+   * These patterns will be excluded from all checks, including strict mode.
+   * @default []
+   * @example ["node_modules", "target", "*.log", "**/.DS_Store"]
+   */
+  ignore?: string[];
+
   /** Root nodes of the file structure tree */
   nodes: Node[];
 }

@@ -111,8 +111,17 @@ async fn main() {
                 }
             };
 
+            // Create ignore matcher from config
+            let ignore_matcher = match mikofia::IgnoreMatcher::new(&config.ignore) {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!("❌ Failed to create ignore matcher: {}", e);
+                    process::exit(2);
+                }
+            };
+
             // Run standard checks
-            mikofia::check(&config.nodes, &check_dir)
+            mikofia::check_with_ignore(&config.nodes, &check_dir, &ignore_matcher)
         }
     };
 

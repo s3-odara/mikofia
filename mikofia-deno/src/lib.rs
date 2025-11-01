@@ -25,10 +25,14 @@ pub async fn check_with_javascript_rules(
     rules_map: Vec<(String, Vec<JavaScriptRuleHandle>)>,
     runtime: &mut DenoRuntime,
 ) -> Result<Vec<mikofia::Violation>, Box<dyn std::error::Error + Send + Sync>> {
-    use mikofia::{RealFileSystem, check};
+    use mikofia::{RealFileSystem, IgnoreMatcher};
 
-    // 1. Run standard checks
-    let mut violations = check(&config.nodes, root);
+    // Create ignore matcher from config
+    let ignore_matcher = IgnoreMatcher::new(&config.ignore)
+        .map_err(|e| format!("Failed to create ignore matcher: {}", e))?;
+
+    // 1. Run standard checks with ignore patterns
+    let mut violations = mikofia::check_with_ignore(&config.nodes, root, &ignore_matcher);
 
     // 2. Run JavaScript custom rules
     let fs = RealFileSystem;
@@ -37,7 +41,18 @@ pub async fn check_with_javascript_rules(
         // Find matching files for this pattern
         let matched_paths = find_matching_paths(root, &pattern, &fs)?;
 
-        for path in matched_paths {
+        // Filter out ignored paths
+        let filtered_paths: Vec<PathBuf> = matched_paths
+            .into_iter()
+            .filter(|path| {
+                path.strip_prefix(root)
+                    .ok()
+                    .map(|relative| !ignore_matcher.is_ignored(relative))
+                    .unwrap_or(true)
+            })
+            .collect();
+
+        for path in filtered_paths {
             // Build evaluation context
             let ctx = build_evaluation_context(&path, &fs)?;
 

@@ -72,6 +72,8 @@ pub enum NodeKind {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
+    #[serde(default)]
+    pub ignore: Vec<String>,
     pub nodes: Vec<Node>,
 }
 

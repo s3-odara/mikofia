@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::fs::{self, FileSystem, RealFileSystem};
 use crate::glob;
+use crate::ignore::IgnoreMatcher;
 use crate::pipeline::CheckPipeline;
 use crate::types::{
     EvaluationContext, Node, ParentInfo, RuleHandle, RuleResult, SiblingInfo, Violation,
@@ -14,16 +15,37 @@ pub fn check(nodes: &[Node], root: &Path) -> Vec<Violation> {
 
 /// Main entry point for validation with custom filesystem
 pub fn check_with_fs<F: FileSystem>(nodes: &[Node], root: &Path, fs: &F) -> Vec<Violation> {
+    check_with_fs_and_ignore(nodes, root, fs, &IgnoreMatcher::empty())
+}
+
+/// Main entry point for validation with ignore patterns
+pub fn check_with_ignore(nodes: &[Node], root: &Path, ignore: &IgnoreMatcher) -> Vec<Violation> {
+    check_with_fs_and_ignore(nodes, root, &RealFileSystem, ignore)
+}
+
+/// Main entry point for validation with custom filesystem and ignore patterns
+pub fn check_with_fs_and_ignore<F: FileSystem>(
+    nodes: &[Node],
+    root: &Path,
+    fs: &F,
+    ignore: &IgnoreMatcher,
+) -> Vec<Violation> {
     nodes
         .iter()
-        .flat_map(|node| check_node(node, root, fs))
+        .flat_map(|node| check_node(node, root, root, fs, ignore))
         .collect()
 }
 
-fn check_node<F: FileSystem>(node: &Node, root: &Path, fs: &F) -> Vec<Violation> {
+fn check_node<F: FileSystem>(
+    node: &Node,
+    workspace_root: &Path,
+    root: &Path,
+    fs: &F,
+    ignore: &IgnoreMatcher,
+) -> Vec<Violation> {
     // Check if path is a glob pattern
     if node.is_glob_pattern() {
-        return check_glob_node(node, root, fs);
+        return check_glob_node(node, workspace_root, root, fs, ignore);
     }
 
     // Regular path checking
@@ -33,7 +55,9 @@ fn check_node<F: FileSystem>(node: &Node, root: &Path, fs: &F) -> Vec<Violation>
     let mut violations = CheckPipeline::new(node, full_path.clone(), exists)
         .check_existence()
         .check_kind(fs)
-        .check_directory_with(|n, p| check_directory_violations(n, p, fs))
+        .check_directory_with(|n, p| {
+            check_directory_violations(n, p, workspace_root, fs, ignore)
+        })
         .violations();
 
     // Execute custom rules if the path exists
@@ -45,7 +69,13 @@ fn check_node<F: FileSystem>(node: &Node, root: &Path, fs: &F) -> Vec<Violation>
     violations
 }
 
-fn check_glob_node<F: FileSystem>(node: &Node, root: &Path, fs: &F) -> Vec<Violation> {
+fn check_glob_node<F: FileSystem>(
+    node: &Node,
+    workspace_root: &Path,
+    root: &Path,
+    fs: &F,
+    ignore: &IgnoreMatcher,
+) -> Vec<Violation> {
     // Expand glob pattern
     let matched_paths = match glob::expand_glob(&node.path, root, fs) {
         Ok(paths) => paths,
@@ -65,8 +95,25 @@ fn check_glob_node<F: FileSystem>(node: &Node, root: &Path, fs: &F) -> Vec<Viola
         }
     };
 
+    // Filter out ignored paths
+    let filtered_paths: Vec<PathBuf> = matched_paths
+        .into_iter()
+        .filter(|path| {
+            let relative_to_root = path.strip_prefix(root);
+            let relative_to_workspace = path.strip_prefix(workspace_root);
+            let ignored_in_root_scope = relative_to_root
+                .map(|relative| ignore.is_ignored(relative))
+                .unwrap_or(false);
+            let ignored_in_workspace_scope = relative_to_workspace
+                .map(|relative| ignore.is_ignored(relative))
+                .unwrap_or(false);
+
+            !(ignored_in_root_scope || ignored_in_workspace_scope)
+        })
+        .collect();
+
     // If required and no matches, that's a violation
-    if matched_paths.is_empty() {
+    if filtered_paths.is_empty() {
         if matches!(node.existence, crate::types::Existence::Required) {
             return vec![Violation::new(
                 "no-files-match-pattern",
@@ -78,7 +125,7 @@ fn check_glob_node<F: FileSystem>(node: &Node, root: &Path, fs: &F) -> Vec<Viola
     }
 
     // Check each matched path
-    matched_paths
+    filtered_paths
         .into_iter()
         .flat_map(|path| {
             let exists = fs.exists(&path);
@@ -87,7 +134,9 @@ fn check_glob_node<F: FileSystem>(node: &Node, root: &Path, fs: &F) -> Vec<Viola
             CheckPipeline::new(node, path.clone(), exists)
                 .check_existence()
                 .check_kind(fs)
-                .check_directory_with(|n, p| check_directory_violations(n, p, fs))
+                .check_directory_with(|n, p| {
+                    check_directory_violations(n, p, workspace_root, fs, ignore)
+                })
                 .violations()
                 .into_iter()
                 .map(move |mut v| {
@@ -103,10 +152,12 @@ fn check_glob_node<F: FileSystem>(node: &Node, root: &Path, fs: &F) -> Vec<Viola
 fn check_directory_violations<F: FileSystem>(
     node: &Node,
     dir_path: &Path,
+    workspace_root: &Path,
     fs: &F,
+    ignore: &IgnoreMatcher,
 ) -> Vec<Violation> {
-    let strict_violations = check_strict(node, dir_path, fs);
-    let children_violations = check_children(node, dir_path, fs);
+    let strict_violations = check_strict(node, dir_path, workspace_root, fs, ignore);
+    let children_violations = check_children(node, dir_path, workspace_root, fs, ignore);
 
     strict_violations
         .into_iter()
@@ -114,14 +165,26 @@ fn check_directory_violations<F: FileSystem>(
         .collect()
 }
 
-fn check_children<F: FileSystem>(node: &Node, dir_path: &Path, fs: &F) -> Vec<Violation> {
+fn check_children<F: FileSystem>(
+    node: &Node,
+    dir_path: &Path,
+    workspace_root: &Path,
+    fs: &F,
+    ignore: &IgnoreMatcher,
+) -> Vec<Violation> {
     node.children
         .iter()
-        .flat_map(|child| check_node(child, dir_path, fs))
+        .flat_map(|child| check_node(child, workspace_root, dir_path, fs, ignore))
         .collect()
 }
 
-fn check_strict<F: FileSystem>(node: &Node, dir_path: &Path, fs: &F) -> Vec<Violation> {
+fn check_strict<F: FileSystem>(
+    node: &Node,
+    dir_path: &Path,
+    workspace_root: &Path,
+    fs: &F,
+    ignore: &IgnoreMatcher,
+) -> Vec<Violation> {
     if !node.is_strict() {
         return vec![];
     }
@@ -173,6 +236,16 @@ fn check_strict<F: FileSystem>(node: &Node, dir_path: &Path, fs: &F) -> Vec<Viol
     actual_items
         .into_iter()
         .filter(|item| {
+            let full_item_path = dir_path.join(item);
+            let relative_item_path = full_item_path
+                .strip_prefix(workspace_root)
+                .unwrap_or(&full_item_path);
+
+            // Filter out ignored items
+            if ignore.is_ignored(relative_item_path) || ignore.is_ignored_str(item) {
+                return false;
+            }
+
             // Check if item matches any defined pattern
             let literal_match = literal_children.iter().any(|literal| literal == item);
             if literal_match {

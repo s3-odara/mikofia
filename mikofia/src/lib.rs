@@ -1,13 +1,15 @@
 mod engine;
 mod fs;
 pub mod glob;
+mod ignore;
 mod pipeline;
 mod reporter;
 mod types;
 
 // Re-export public API
-pub use engine::{check, check_with_fs};
+pub use engine::{check, check_with_fs, check_with_fs_and_ignore, check_with_ignore};
 pub use fs::{FileSystem, RealFileSystem};
+pub use ignore::IgnoreMatcher;
 pub use reporter::{ConsoleReporter, EvaluationResult, Reporter, violations_to_results};
 pub use types::{
     Config, EvaluationContext, Existence, NativeRule, Node, NodeKind, ParentInfo, RuleHandle,
@@ -391,6 +393,32 @@ mod tests {
             root.join("config/secret.toml")
                 .to_string_lossy()
                 .into_owned()
+        );
+    }
+
+    #[test]
+    fn test_mock_fs_strict_directory_honors_nested_ignore() {
+        let root = mock_root();
+        let mut mock_fs = MockFileSystem::new();
+        mock_fs.add_dir(root.join("tmp"));
+        mock_fs.add_dir(root.join("tmp/cache"));
+        mock_fs.add_file(root.join("tmp/cache/data.txt"), "data");
+
+        let nodes = vec![Node {
+            path: "tmp".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::Directory,
+            children: vec![],
+            strict: Some(true),
+            rules: vec![],
+        }];
+
+        let ignore = IgnoreMatcher::new(&vec!["tmp/cache".to_string()]).unwrap();
+
+        let violations = check_with_fs_and_ignore(&nodes, &root, &mock_fs, &ignore);
+        assert!(
+            violations.is_empty(),
+            "unexpected violations when ignoring nested path: {violations:?}"
         );
     }
 
