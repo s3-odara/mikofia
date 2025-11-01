@@ -1,4 +1,4 @@
-use globset::{Glob, GlobBuilder};
+use globset::{Glob, GlobBuilder, escape};
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -64,6 +64,22 @@ pub fn expand_glob<F: FileSystem>(
         })?;
 
     Ok(matches)
+}
+
+/// Determine whether a pattern contains glob syntax recognized by `globset`.
+pub fn is_glob_pattern(pattern: &str) -> bool {
+    let parsed = match GlobBuilder::new(pattern).build() {
+        Ok(glob) => glob,
+        Err(_) => return false,
+    };
+
+    let literal_pattern = escape(pattern);
+    let literal = match GlobBuilder::new(&literal_pattern).build() {
+        Ok(glob) => glob,
+        Err(_) => return false,
+    };
+
+    parsed.regex() != literal.regex()
 }
 
 #[cfg(test)]
@@ -187,11 +203,23 @@ mod tests {
         assert!(matcher.is_match("subdir/file.txt"));
         assert!(!matcher.is_match("subdir/nested/file.txt"));
     }
+
+    #[test]
+    fn detects_glob_patterns() {
+        assert!(is_glob_pattern("*.rs"));
+        assert!(is_glob_pattern("src/**/mod.rs"));
+        assert!(is_glob_pattern("{foo,bar}.txt"));
+    }
+
+    #[test]
+    fn treats_literals_as_non_glob() {
+        assert!(!is_glob_pattern("src/main.rs"));
+        assert!(!is_glob_pattern("node_modules"));
+        assert!(!is_glob_pattern("foo\u{2603}.txt"));
+    }
 }
 
 /// Build a glob pattern that treats path separators literally (similar to minimatch).
 pub fn build_literal_glob(pattern: &str) -> Result<Glob, globset::Error> {
-    GlobBuilder::new(pattern)
-        .literal_separator(true)
-        .build()
+    GlobBuilder::new(pattern).literal_separator(true).build()
 }

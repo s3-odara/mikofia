@@ -25,7 +25,7 @@ pub async fn check_with_javascript_rules(
     rules_map: Vec<(String, Vec<JavaScriptRuleHandle>)>,
     runtime: &mut DenoRuntime,
 ) -> Result<Vec<mikofia::Violation>, Box<dyn std::error::Error + Send + Sync>> {
-    use mikofia::{RealFileSystem, IgnoreMatcher};
+    use mikofia::{IgnoreMatcher, RealFileSystem};
 
     // Create ignore matcher from config
     let ignore_matcher = IgnoreMatcher::new(&config.ignore)

@@ -20,7 +20,7 @@ impl IgnoreMatcher {
 
                 // For patterns without wildcards, also add a pattern that matches subdirectories
                 // This makes "node_modules" match both "node_modules" and "node_modules/**/*"
-                if !pattern.contains('*') && !pattern.contains('?') && !pattern.contains('[') {
+                if !crate::glob::is_glob_pattern(pattern) {
                     let dir_pattern = format!("{}/**", pattern);
                     if let Ok(dir_glob) = crate::glob::build_literal_glob(&dir_pattern) {
                         builder.add(dir_glob);

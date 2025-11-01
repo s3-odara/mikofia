@@ -35,20 +35,7 @@ impl Node {
 
     /// Check whether the path uses glob syntax understood by `globset`
     pub fn is_glob_pattern(&self) -> bool {
-        use globset::{GlobBuilder, escape};
-
-        // If the pattern fails to parse as a glob, treat it as a literal.
-        let Ok(parsed) = GlobBuilder::new(&self.path).build() else {
-            return false;
-        };
-
-        // Compare against the same text escaped into a purely literal glob.
-        let literal_pattern = escape(&self.path);
-        let Ok(literal) = GlobBuilder::new(&literal_pattern).build() else {
-            return false;
-        };
-
-        parsed.regex() != literal.regex()
+        crate::glob::is_glob_pattern(&self.path)
     }
 }
 

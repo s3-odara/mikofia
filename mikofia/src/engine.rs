@@ -55,9 +55,7 @@ fn check_node<F: FileSystem>(
     let mut violations = CheckPipeline::new(node, full_path.clone(), exists)
         .check_existence()
         .check_kind(fs)
-        .check_directory_with(|n, p| {
-            check_directory_violations(n, p, workspace_root, fs, ignore)
-        })
+        .check_directory_with(|n, p| check_directory_violations(n, p, workspace_root, fs, ignore))
         .violations();
 
     // Execute custom rules if the path exists
