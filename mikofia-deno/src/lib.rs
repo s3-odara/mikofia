@@ -89,8 +89,8 @@ fn find_matching_paths(
     pattern: &str,
     fs: &impl mikofia::FileSystem,
 ) -> Result<Vec<PathBuf>, Box<dyn std::error::Error + Send + Sync>> {
-    // If pattern contains glob characters, use glob expansion
-    if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+    // If pattern contains glob syntax, use glob expansion
+    if mikofia::glob::is_glob_pattern(pattern) {
         if let Some((literal_prefix, remainder_pattern)) = split_literal_prefix(pattern) {
             let base_dir = root.join(&literal_prefix);
 
