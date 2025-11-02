@@ -1,10 +1,104 @@
-use deno_core::{extension, op2};
+use deno_core::{extension, op2, OpState};
+use std::cell::RefCell;
+use std::io;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 /// Maximum file size that can be read (10MB)
 const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
-extension!(mikofia_ops, ops = [op_read_file, op_read_json, op_exists],);
+#[derive(Default)]
+pub(crate) struct AllowedPaths {
+    roots: Vec<PathBuf>,
+}
+
+impl AllowedPaths {
+    fn replace_roots(&mut self, roots: &[PathBuf]) -> io::Result<()> {
+        let mut canonical_roots = Vec::with_capacity(roots.len());
+        for root in roots {
+            let canonical = root
+                .canonicalize()
+                .map_err(|e| io::Error::new(e.kind(), format!("Invalid project root {}: {}", root.display(), e)))?;
+            canonical_roots.push(canonical);
+        }
+        self.roots = canonical_roots;
+        Ok(())
+    }
+
+    fn ensure_allowed(&self, path: &Path, allow_nonexistent: bool) -> io::Result<()> {
+        if !path.is_absolute() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Path must be absolute",
+            ));
+        }
+
+        if self.roots.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "No project root configured for file access",
+            ));
+        }
+
+        match path.canonicalize() {
+            Ok(canonical) => {
+                if self
+                    .roots
+                    .iter()
+                    .any(|root| canonical.starts_with(root))
+                {
+                    Ok(())
+                } else {
+                    Err(permission_error(path))
+                }
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound && allow_nonexistent => {
+                if let Some(existing_ancestor) = self.find_existing_ancestor(path)? {
+                    if self
+                        .roots
+                        .iter()
+                        .any(|root| existing_ancestor.starts_with(root))
+                    {
+                        return Ok(());
+                    }
+                }
+                Err(permission_error(path))
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    fn find_existing_ancestor(&self, path: &Path) -> io::Result<Option<PathBuf>> {
+        let mut current = path;
+        while let Some(parent) = current.parent() {
+            if parent.as_os_str().is_empty() {
+                break;
+            }
+            match parent.canonicalize() {
+                Ok(canonical) => return Ok(Some(canonical)),
+                Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                    current = parent;
+                    continue;
+                }
+                Err(err) => return Err(err),
+            }
+        }
+        Ok(None)
+    }
+}
+
+pub(crate) fn set_allowed_roots(op_state: &mut OpState, roots: &[PathBuf]) -> io::Result<()> {
+    let allowed = op_state.borrow_mut::<AllowedPaths>();
+    allowed.replace_roots(roots)
+}
+
+extension!(
+    mikofia_ops,
+    ops = [op_read_file, op_read_json, op_exists],
+    state = |state| {
+        state.put(AllowedPaths::default());
+    }
+);
 
 /// Initialize the mikofia ops extension
 pub fn init_ops() -> deno_core::Extension {
@@ -15,9 +109,12 @@ pub fn init_ops() -> deno_core::Extension {
 /// Security: Only files within the project root can be accessed
 #[op2(async)]
 #[string]
-async fn op_read_file(#[string] path: String) -> Result<String, std::io::Error> {
-    // Validate path
-    validate_path(&path)?;
+async fn op_read_file(
+    state: Rc<RefCell<OpState>>,
+    #[string] path: String,
+) -> Result<String, std::io::Error> {
+    let path_buf = PathBuf::from(&path);
+    validate_path(&state, &path_buf, true)?;
 
     // Check file size
     let metadata = tokio::fs::metadata(&path).await?;
@@ -36,9 +133,13 @@ async fn op_read_file(#[string] path: String) -> Result<String, std::io::Error> 
 /// Read and parse JSON file
 #[op2(async)]
 #[serde]
-async fn op_read_json(#[string] path: String) -> Result<serde_json::Value, std::io::Error> {
+async fn op_read_json(
+    state: Rc<RefCell<OpState>>,
+    #[string] path: String,
+) -> Result<serde_json::Value, std::io::Error> {
+    let path_buf = PathBuf::from(&path);
     // Read file contents
-    validate_path(&path)?;
+    validate_path(&state, &path_buf, true)?;
     let metadata = tokio::fs::metadata(&path).await?;
     if metadata.len() > MAX_FILE_SIZE {
         return Err(std::io::Error::new(
@@ -57,9 +158,10 @@ async fn op_read_json(#[string] path: String) -> Result<serde_json::Value, std::
 /// Check if file or directory exists
 #[op2(fast)]
 #[smi]
-fn op_exists(#[string] path: &str) -> u32 {
+fn op_exists(state: Rc<RefCell<OpState>>, #[string] path: &str) -> u32 {
+    let path_buf = PathBuf::from(path);
     // Validate path (return 0 for invalid paths)
-    if validate_path(path).is_err() {
+    if validate_path(&state, &path_buf, true).is_err() {
         return 0;
     }
 
@@ -67,28 +169,21 @@ fn op_exists(#[string] path: &str) -> u32 {
 }
 
 /// Validate that the path is within allowed boundaries
-fn validate_path(path: &str) -> Result<(), std::io::Error> {
-    let path_buf = PathBuf::from(path);
+fn validate_path(
+    state: &Rc<RefCell<OpState>>,
+    path: &Path,
+    allow_nonexistent: bool,
+) -> Result<(), std::io::Error> {
+    let op_state = state.borrow();
+    let allowed = op_state.borrow::<AllowedPaths>();
+    allowed.ensure_allowed(path, allow_nonexistent)
+}
 
-    // Check if path is absolute (required for security)
-    if !path_buf.is_absolute() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "Path must be absolute",
-        ));
-    }
-
-    // Canonicalize to prevent directory traversal attacks
-    // Note: This will fail if the path doesn't exist, which is acceptable
-    // for read operations but not for exists checks
-    if path_buf.exists() {
-        let _canonical = path_buf.canonicalize()?;
-        // Additional validation could be added here to ensure
-        // the path is within the project root
-        // This would require passing the root path through OpState
-    }
-
-    Ok(())
+fn permission_error(path: &Path) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        format!("Access to {} is not allowed", path.display()),
+    )
 }
 
 #[cfg(test)]
@@ -97,13 +192,19 @@ mod tests {
 
     #[test]
     fn test_validate_path_rejects_relative() {
-        let result = validate_path("../secret.txt");
-        assert!(result.is_err());
+        let cwd = std::env::current_dir().unwrap();
+        let mut allowed = AllowedPaths::default();
+        allowed.replace_roots(&[cwd]).unwrap();
+        let result = allowed.ensure_allowed(Path::new("../secret.txt"), true);
+        assert!(matches!(result, Err(e) if e.kind() == std::io::ErrorKind::InvalidInput));
     }
 
     #[test]
     fn test_validate_path_rejects_relative_current() {
-        let result = validate_path("./file.txt");
-        assert!(result.is_err());
+        let cwd = std::env::current_dir().unwrap();
+        let mut allowed = AllowedPaths::default();
+        allowed.replace_roots(&[cwd]).unwrap();
+        let result = allowed.ensure_allowed(Path::new("./file.txt"), true);
+        assert!(matches!(result, Err(e) if e.kind() == std::io::ErrorKind::InvalidInput));
     }
 }

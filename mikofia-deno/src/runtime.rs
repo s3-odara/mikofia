@@ -2,7 +2,8 @@ use deno_core::{
     FsModuleLoader, JsRuntime, ModuleId, ModuleSpecifier, RuntimeOptions, serde_v8, v8,
 };
 use mikofia::{Config, EvaluationContext, RuleResult};
-use std::path::Path;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 /// Deno runtime wrapper for executing JavaScript/TypeScript rules
@@ -22,11 +23,39 @@ impl DenoRuntime {
         Ok(Self { js_runtime })
     }
 
+    /// Restrict filesystem operations to the provided root directories.
+    pub fn set_allowed_roots<I, P>(&mut self, roots: I) -> io::Result<()>
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+    {
+        let collected: Vec<PathBuf> = roots.into_iter().map(|p| p.as_ref().to_path_buf()).collect();
+        if collected.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "At least one project root must be provided",
+            ));
+        }
+
+        let op_state_rc = self.js_runtime.op_state();
+        {
+            let mut op_state = op_state_rc.borrow_mut();
+            crate::ops::set_allowed_roots(&mut op_state, &collected)?;
+        }
+        Ok(())
+    }
+
     /// Load a TypeScript config file and return parsed Config
     pub async fn load_config(
         &mut self,
         path: &Path,
     ) -> Result<Config, Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(parent) = path.parent() {
+            self.set_allowed_roots([parent]).map_err(|e| {
+                format!("Failed to configure allowed paths for config: {}", e)
+            })?;
+        }
+
         // Convert path to module specifier
         let module_specifier =
             ModuleSpecifier::from_file_path(path).map_err(|_| "Invalid file path")?;
@@ -59,6 +88,12 @@ impl DenoRuntime {
         ),
         Box<dyn std::error::Error + Send + Sync>,
     > {
+        if let Some(parent) = path.parent() {
+            self.set_allowed_roots([parent]).map_err(|e| {
+                format!("Failed to configure allowed paths for config: {}", e)
+            })?;
+        }
+
         // Convert path to module specifier
         let module_specifier =
             ModuleSpecifier::from_file_path(path).map_err(|_| "Invalid file path")?;

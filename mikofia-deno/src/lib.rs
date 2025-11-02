@@ -27,6 +27,10 @@ pub async fn check_with_javascript_rules(
 ) -> Result<Vec<mikofia::Violation>, Box<dyn std::error::Error + Send + Sync>> {
     use mikofia::{IgnoreMatcher, RealFileSystem};
 
+    runtime
+        .set_allowed_roots([root])
+        .map_err(|e| format!("Failed to configure project root: {}", e))?;
+
     // Create ignore matcher from config
     let ignore_matcher = IgnoreMatcher::new(&config.ignore)
         .map_err(|e| format!("Failed to create ignore matcher: {}", e))?;
