@@ -173,7 +173,7 @@ async fn load_config(
     match config_type {
         Some(ConfigType::Deno) => {
             // Load Deno config (JavaScript/TypeScript) using Deno runtime
-            mikofia_deno::load_javascript_config(path).await
+            mikofia_deno::load_deno_config(path).await
         }
         Some(ConfigType::Json) | None => {
             // Load JSON config using existing method

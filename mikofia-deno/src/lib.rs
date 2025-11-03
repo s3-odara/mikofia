@@ -10,8 +10,11 @@ pub use runtime::DenoRuntime;
 use mikofia::Config;
 use std::path::{Component, Path, PathBuf};
 
-/// Load a JavaScript configuration file
-pub async fn load_javascript_config(
+/// Load a Deno-based configuration file (JavaScript or TypeScript)
+///
+/// This function uses the Deno runtime to load and execute configuration files.
+/// Supported formats: `.js`, `.ts`
+pub async fn load_deno_config(
     path: &Path,
 ) -> Result<Config, Box<dyn std::error::Error + Send + Sync>> {
     let mut runtime = DenoRuntime::new()?;
@@ -248,7 +251,7 @@ mod tests {
 
         fs::write(&config_path, config_content).unwrap();
 
-        let config = load_javascript_config(&config_path).await.unwrap();
+        let config = load_deno_config(&config_path).await.unwrap();
         assert_eq!(config.nodes.len(), 1);
         assert_eq!(config.nodes[0].path, "test.txt");
         assert_eq!(config.nodes[0].existence, mikofia::Existence::Required);
@@ -272,7 +275,7 @@ mod tests {
 
         fs::write(&config_path, config_content).unwrap();
 
-        let config = load_javascript_config(&config_path).await.unwrap();
+        let config = load_deno_config(&config_path).await.unwrap();
         assert_eq!(config.nodes.len(), 1);
         assert_eq!(config.nodes[0].path, "src");
         assert_eq!(config.nodes[0].existence, mikofia::Existence::Optional);
@@ -311,7 +314,7 @@ mod tests {
 
         fs::write(&config_path, config_content).unwrap();
 
-        let config = load_javascript_config(&config_path).await.unwrap();
+        let config = load_deno_config(&config_path).await.unwrap();
         assert_eq!(config.nodes.len(), 1);
         assert_eq!(config.nodes[0].children.len(), 2);
         assert_eq!(config.nodes[0].children[0].path, "main.rs");
