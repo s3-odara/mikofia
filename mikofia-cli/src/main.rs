@@ -98,10 +98,16 @@ async fn main() {
     println!("📁 Directory: {}", check_dir.display());
     println!("⚙️  Config: {}\n", config_path.display());
 
-    let config_type = config_path
-        .extension()
-        .and_then(|s| s.to_str())
-        .and_then(config_type_from_extension);
+    let raw_extension = config_path.extension().and_then(|s| s.to_str());
+    let config_type = raw_extension.and_then(config_type_from_extension);
+
+    if raw_extension.is_some() && config_type.is_none() {
+        eprintln!(
+            "❌ Unsupported config file extension: .{}",
+            raw_extension.unwrap()
+        );
+        process::exit(2);
+    }
 
     let violations = match config_type {
         Some(ConfigType::Deno) => {
@@ -179,20 +185,22 @@ async fn main() {
 async fn load_config(
     path: &Path,
 ) -> Result<mikofia::Config, Box<dyn std::error::Error + Send + Sync>> {
-    let config_type = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .and_then(config_type_from_extension);
+    let raw_extension = path.extension().and_then(|s| s.to_str());
 
-    match config_type {
-        Some(ConfigType::Deno) => {
-            // Load Deno config (JavaScript/TypeScript) using Deno runtime
-            mikofia_deno::load_deno_config(path).await
-        }
-        Some(ConfigType::Json) | None => {
-            // Load JSON config using existing method
-            mikofia::Config::from_file(path)
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-        }
+    match raw_extension {
+        Some(ext) => match config_type_from_extension(ext) {
+            Some(ConfigType::Deno) => {
+                // Load Deno config (JavaScript/TypeScript) using Deno runtime
+                mikofia_deno::load_deno_config(path).await
+            }
+            Some(ConfigType::Json) => {
+                // Load JSON config using existing method
+                mikofia::Config::from_file(path)
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+            }
+            None => Err(format!("Unsupported config file extension: .{}", ext).into()),
+        },
+        None => mikofia::Config::from_file(path)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
     }
 }
