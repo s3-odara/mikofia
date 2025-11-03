@@ -107,12 +107,17 @@ impl ModuleLoader for TsModuleLoader {
                     )
                 })?;
 
+                // Configure emit options for better debugging support
+                // - Inline source maps for mapping JS errors back to TS source
+                // - Include original TypeScript source in the source map
+                let emit_options = deno_ast::EmitOptions {
+                    source_map: deno_ast::SourceMapOption::Inline,
+                    inline_sources: true,
+                    ..Default::default()
+                };
+
                 let transpiled = parsed
-                    .transpile(
-                        &Default::default(),
-                        &Default::default(),
-                        &Default::default(),
-                    )
+                    .transpile(&Default::default(), &Default::default(), &emit_options)
                     .map_err(|e| {
                         std::io::Error::new(
                             std::io::ErrorKind::Other,
@@ -203,5 +208,49 @@ mod tests {
             first_bytes, second_bytes,
             "cached module should reuse transpiled source"
         );
+    }
+
+    #[tokio::test]
+    async fn transpiled_code_includes_inline_source_map() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.ts");
+        std::fs::write(
+            &file_path,
+            r#"
+                interface Config {
+                    nodes: string[];
+                }
+                const config: Config = {
+                    nodes: ["test"],
+                };
+                export default config;
+            "#,
+        )
+        .unwrap();
+
+        let specifier = ModuleSpecifier::from_file_path(&file_path).unwrap();
+        let loader = TsModuleLoader::new();
+
+        let module = load_module(&loader, &specifier).await;
+        let code = std::str::from_utf8(module.code.as_bytes()).unwrap();
+
+        // Check that inline source map is present
+        assert!(
+            code.contains("//# sourceMappingURL=data:application/json;base64,"),
+            "Transpiled code should contain inline source map"
+        );
+
+        // Verify it's a base64-encoded JSON source map
+        if let Some(source_map_line) = code
+            .lines()
+            .find(|line| line.starts_with("//# sourceMappingURL="))
+        {
+            assert!(
+                source_map_line.contains("data:application/json;base64,"),
+                "Source map should be base64-encoded"
+            );
+        } else {
+            panic!("Source map URL comment not found");
+        }
     }
 }
