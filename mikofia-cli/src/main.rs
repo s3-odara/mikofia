@@ -4,6 +4,24 @@ use std::process;
 
 use mikofia::Reporter;
 
+/// Configuration file type based on extension
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConfigType {
+    /// Deno-based config (.js, .ts)
+    Deno,
+    /// JSON config (.json)
+    Json,
+}
+
+/// Pure function to determine config type from file extension
+fn config_type_from_extension(ext: &str) -> Option<ConfigType> {
+    match ext {
+        "js" | "ts" => Some(ConfigType::Deno),
+        "json" => Some(ConfigType::Json),
+        _ => None,
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "mikofia")]
 #[command(version, about = "A file structure validation tool", long_about = None)]
@@ -66,9 +84,14 @@ async fn main() {
     println!("📁 Directory: {}", check_dir.display());
     println!("⚙️  Config: {}\n", config_path.display());
 
-    let violations = match config_path.extension().and_then(|s| s.to_str()) {
-        Some("js") => {
-            // Load JavaScript config with custom rules
+    let config_type = config_path
+        .extension()
+        .and_then(|s| s.to_str())
+        .and_then(config_type_from_extension);
+
+    let violations = match config_type {
+        Some(ConfigType::Deno) => {
+            // Load Deno config (JavaScript/TypeScript) with custom rules
             let mut runtime = match mikofia_deno::DenoRuntime::new() {
                 Ok(rt) => rt,
                 Err(e) => {
@@ -101,7 +124,7 @@ async fn main() {
                 }
             }
         }
-        _ => {
+        Some(ConfigType::Json) | None => {
             // Load JSON config
             let config = match load_config(&config_path).await {
                 Ok(c) => c,
@@ -138,20 +161,24 @@ async fn main() {
     }
 }
 
-/// Load configuration from either JSON or JavaScript file
+/// Load configuration from JSON or Deno-based file (JavaScript/TypeScript)
 async fn load_config(
     path: &PathBuf,
 ) -> Result<mikofia::Config, Box<dyn std::error::Error + Send + Sync>> {
-    match path.extension().and_then(|s| s.to_str()) {
-        Some("js") => {
-            // Load JavaScript config using Deno runtime
+    let config_type = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .and_then(config_type_from_extension);
+
+    match config_type {
+        Some(ConfigType::Deno) => {
+            // Load Deno config (JavaScript/TypeScript) using Deno runtime
             mikofia_deno::load_javascript_config(path).await
         }
-        Some("json") | None => {
+        Some(ConfigType::Json) | None => {
             // Load JSON config using existing method
             mikofia::Config::from_file(path)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         }
-        Some(ext) => Err(format!("Unsupported config file extension: .{}", ext).into()),
     }
 }
