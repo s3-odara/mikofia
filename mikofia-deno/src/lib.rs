@@ -539,4 +539,112 @@ mod tests {
             violation.message
         );
     }
+
+    #[tokio::test]
+    async fn test_load_typescript_config() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("test.config.ts");
+
+        let config_content = r#"
+            interface Node {
+                path: string;
+                existence?: "required" | "optional" | "forbidden";
+                kind?: "file" | "directory" | "any";
+            }
+
+            interface Config {
+                nodes: Node[];
+            }
+
+            const config: Config = {
+                nodes: [
+                    {
+                        path: "test.txt",
+                        existence: "required",
+                        kind: "file",
+                    }
+                ]
+            };
+            export default config;
+        "#;
+
+        fs::write(&config_path, config_content).unwrap();
+
+        let config = load_deno_config(&config_path).await.unwrap();
+        assert_eq!(config.nodes.len(), 1);
+        assert_eq!(config.nodes[0].path, "test.txt");
+        assert_eq!(config.nodes[0].existence, mikofia::Existence::Required);
+        assert_eq!(config.nodes[0].kind, mikofia::NodeKind::File);
+    }
+
+    #[tokio::test]
+    async fn test_typescript_config_with_custom_rules() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+
+        let config_path = root.join("mikofia.config.ts");
+        let config_content = r#"
+            type RuleFunction = (ctx: any) => any;
+
+            interface NodeConfig {
+                path: string;
+                existence?: "required" | "optional" | "forbidden";
+                kind?: "file" | "directory" | "any";
+                rules?: RuleFunction[];
+            }
+
+            interface Config {
+                nodes: NodeConfig[];
+            }
+
+            const config: Config = {
+                nodes: [
+                    {
+                        path: "src/**/*.ts",
+                        existence: "optional",
+                        kind: "file",
+                        rules: [
+                            (ctx) => {
+                                if (ctx.name.includes("test")) {
+                                    return {
+                                        type: "fail",
+                                        violation: {
+                                            key: "no-test-in-name",
+                                            message: `Test files not allowed: ${ctx.name}`
+                                        }
+                                    };
+                                }
+                                return { type: "pass" };
+                            }
+                        ]
+                    }
+                ]
+            };
+
+            export default config;
+        "#;
+
+        fs::write(&config_path, config_content).unwrap();
+
+        let src_dir = root.join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        let test_file = src_dir.join("test_file.ts");
+        fs::write(&test_file, "// demo").unwrap();
+
+        let mut runtime = DenoRuntime::new().unwrap();
+        let (config, rules_map) = runtime.load_config_with_rules(&config_path).await.unwrap();
+
+        let violations = check_with_javascript_rules(config, root, rules_map, &mut runtime)
+            .await
+            .unwrap();
+
+        assert_eq!(violations.len(), 1);
+        let violation = &violations[0];
+        assert_eq!(violation.key, "no-test-in-name");
+        assert!(
+            violation.message.contains("test_file.ts"),
+            "violation message was {}",
+            violation.message
+        );
+    }
 }
