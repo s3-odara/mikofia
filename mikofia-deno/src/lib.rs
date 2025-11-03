@@ -2,10 +2,12 @@ mod context;
 mod ops;
 mod rules;
 mod runtime;
+mod ts_loader;
 
 pub use context::{context_to_v8, create_context_with_fs};
 pub use rules::{JavaScriptRuleHandle, js_value_to_rule_result};
 pub use runtime::DenoRuntime;
+pub use ts_loader::TsModuleLoader;
 
 use mikofia::Config;
 use std::path::{Component, Path, PathBuf};

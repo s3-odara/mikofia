@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 deno_core = "0.350"
 deno_runtime = "0.215"
+deno_ast = { version = "=0.51.0", features = ["transpiling"] }
 globset = "0.4"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }

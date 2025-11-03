@@ -1,6 +1,4 @@
-use deno_core::{
-    FsModuleLoader, JsRuntime, ModuleId, ModuleSpecifier, RuntimeOptions, serde_v8, v8,
-};
+use deno_core::{JsRuntime, ModuleId, ModuleSpecifier, RuntimeOptions, serde_v8, v8};
 use mikofia::{Config, EvaluationContext, RuleResult};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -15,7 +13,7 @@ impl DenoRuntime {
     /// Create a new Deno runtime with mikofia extensions
     pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let mut js_runtime = JsRuntime::new(RuntimeOptions {
-            module_loader: Some(Rc::new(FsModuleLoader)),
+            module_loader: Some(Rc::new(crate::ts_loader::TsModuleLoader::new())),
             extensions: vec![crate::ops::init_ops()],
             ..Default::default()
         });

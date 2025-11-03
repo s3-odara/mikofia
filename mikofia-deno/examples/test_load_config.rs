@@ -1,8 +1,8 @@
-use mikofia_deno::load_javascript_config;
+use mikofia_deno::load_deno_config;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Load the JavaScript config file
+    // Load the Deno config file (JavaScript or TypeScript)
     let config_path = std::env::current_dir()?
         .parent()
         .ok_or("No parent directory")?
@@ -10,7 +10,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     println!("Loading config from: {:?}", config_path);
 
-    let config = load_javascript_config(&config_path).await?;
+    let config = load_deno_config(&config_path).await?;
 
     println!("✓ Config loaded successfully!");
     println!("  Total nodes: {}", config.nodes.len());
