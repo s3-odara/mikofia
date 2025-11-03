@@ -1,5 +1,5 @@
 use clap::Parser;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 
 use mikofia::Reporter;
@@ -15,10 +15,16 @@ enum ConfigType {
 
 /// Pure function to determine config type from file extension
 fn config_type_from_extension(ext: &str) -> Option<ConfigType> {
-    match ext {
-        "js" | "ts" => Some(ConfigType::Deno),
-        "json" => Some(ConfigType::Json),
-        _ => None,
+    let is_deno = ["js", "ts"]
+        .iter()
+        .any(|candidate| ext.eq_ignore_ascii_case(candidate));
+
+    if is_deno {
+        Some(ConfigType::Deno)
+    } else if ext.eq_ignore_ascii_case("json") {
+        Some(ConfigType::Json)
+    } else {
+        None
     }
 }
 
@@ -55,7 +61,11 @@ async fn main() {
         }
         None => {
             // Try in order: .ts → .js → .json (TypeScript preferred)
-            let candidates = ["mikofia.config.ts", "mikofia.config.js", "mikofia.config.json"];
+            let candidates = [
+                "mikofia.config.ts",
+                "mikofia.config.js",
+                "mikofia.config.json",
+            ];
 
             let found = candidates
                 .iter()
@@ -167,7 +177,7 @@ async fn main() {
 
 /// Load configuration from JSON or Deno-based file (JavaScript/TypeScript)
 async fn load_config(
-    path: &PathBuf,
+    path: &Path,
 ) -> Result<mikofia::Config, Box<dyn std::error::Error + Send + Sync>> {
     let config_type = path
         .extension()
