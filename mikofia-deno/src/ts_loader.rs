@@ -3,13 +3,25 @@ use deno_core::{
     ModuleLoadResponse, ModuleLoader, ModuleSource, ModuleSourceCode, ModuleSpecifier, ModuleType,
     RequestedModuleType, ResolutionKind, error::ModuleLoaderError,
 };
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+
+#[derive(Clone)]
+struct CachedModule {
+    code: Arc<str>,
+    module_type: ModuleType,
+}
 
 /// Custom module loader that supports TypeScript transpilation
-pub struct TsModuleLoader;
+pub struct TsModuleLoader {
+    cache: Arc<RwLock<HashMap<ModuleSpecifier, CachedModule>>>,
+}
 
 impl TsModuleLoader {
     pub fn new() -> Self {
-        Self
+        Self {
+            cache: Arc::new(RwLock::new(HashMap::new())),
+        }
     }
 }
 
@@ -31,8 +43,21 @@ impl ModuleLoader for TsModuleLoader {
         _requested_module_type: RequestedModuleType,
     ) -> ModuleLoadResponse {
         let module_specifier = module_specifier.clone();
+        let cache = self.cache.clone();
 
         let future = async move {
+            if let Some(cached) = {
+                let guard = cache.read().expect("ts loader cache poisoned");
+                guard.get(&module_specifier).cloned()
+            } {
+                return Ok(ModuleSource::new(
+                    cached.module_type,
+                    ModuleSourceCode::String(cached.code.clone().into()),
+                    &module_specifier,
+                    None,
+                ));
+            }
+
             // Convert URL to file path
             let path = module_specifier.to_file_path().map_err(|_| {
                 std::io::Error::new(
@@ -66,7 +91,7 @@ impl ModuleLoader for TsModuleLoader {
             })?;
 
             // Transpile if needed
-            let code = if should_transpile {
+            let code: Arc<str> = if should_transpile {
                 let parsed = deno_ast::parse_module(deno_ast::ParseParams {
                     specifier: module_specifier.clone(),
                     text: code.into(),
@@ -82,7 +107,7 @@ impl ModuleLoader for TsModuleLoader {
                     )
                 })?;
 
-                parsed
+                let transpiled = parsed
                     .transpile(
                         &Default::default(),
                         &Default::default(),
@@ -94,10 +119,11 @@ impl ModuleLoader for TsModuleLoader {
                             format!("Failed to transpile TypeScript: {}", e),
                         )
                     })?
-                    .into_source()
-                    .text
+                    .into_source();
+
+                Arc::<str>::from(transpiled.text)
             } else {
-                code
+                Arc::<str>::from(code)
             };
 
             let module_type = match media_type {
@@ -105,12 +131,19 @@ impl ModuleLoader for TsModuleLoader {
                 _ => ModuleType::JavaScript,
             };
 
-            Ok(ModuleSource::new(
-                module_type,
-                ModuleSourceCode::String(code.into()),
+            let module_source = ModuleSource::new(
+                module_type.clone(),
+                ModuleSourceCode::String(code.clone().into()),
                 &module_specifier,
                 None,
-            ))
+            );
+
+            {
+                let mut guard = cache.write().expect("ts loader cache poisoned");
+                guard.insert(module_specifier.clone(), CachedModule { code, module_type });
+            }
+
+            Ok(module_source)
         };
 
         ModuleLoadResponse::Async(Box::pin(future))
@@ -120,5 +153,55 @@ impl ModuleLoader for TsModuleLoader {
 impl Default for TsModuleLoader {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use deno_core::ModuleLoader;
+    use tempfile::TempDir;
+
+    async fn load_module(loader: &TsModuleLoader, specifier: &ModuleSpecifier) -> ModuleSource {
+        match loader.load(specifier, None, false, RequestedModuleType::None) {
+            ModuleLoadResponse::Sync(result) => result.expect("sync load failed"),
+            ModuleLoadResponse::Async(fut) => fut.await.expect("async load failed"),
+        }
+    }
+
+    #[tokio::test]
+    async fn returns_cached_module_when_source_removed() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("config.ts");
+        std::fs::write(
+            &file_path,
+            r#"
+                export default {
+                    nodes: [],
+                };
+            "#,
+        )
+        .unwrap();
+
+        let specifier = ModuleSpecifier::from_file_path(&file_path).unwrap();
+        let loader = TsModuleLoader::new();
+
+        let first = load_module(&loader, &specifier).await;
+        let first_bytes = first.code.as_bytes().to_vec();
+
+        // Remove the file to ensure the second load must hit the cache.
+        std::fs::remove_file(&file_path).unwrap();
+
+        let second = load_module(&loader, &specifier).await;
+        let second_bytes = second.code.as_bytes().to_vec();
+
+        assert_eq!(
+            first.module_type, second.module_type,
+            "cached module should preserve module type"
+        );
+        assert_eq!(
+            first_bytes, second_bytes,
+            "cached module should reuse transpiled source"
+        );
     }
 }
