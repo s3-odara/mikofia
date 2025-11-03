@@ -26,7 +26,7 @@ fn config_type_from_extension(ext: &str) -> Option<ConfigType> {
 #[command(name = "mikofia")]
 #[command(version, about = "A file structure validation tool", long_about = None)]
 struct Args {
-    /// Path to the configuration file (supports .json and .js)
+    /// Path to the configuration file (supports .json, .js, and .ts)
     #[arg(short, long)]
     config: Option<PathBuf>,
 
