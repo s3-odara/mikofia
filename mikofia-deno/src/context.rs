@@ -22,13 +22,13 @@ pub fn create_context_with_fs<'s>(
     let ctx_value = serde_v8::to_v8(scope, ctx)?;
     let ctx_obj: v8::Local<v8::Object> = ctx_value
         .try_into()
-        .map_err(|_| "Failed to convert context to object")?;
+        .map_err(|_| io_error("Failed to convert context to object"))?;
 
     // Create the fs object with bound methods
     let fs_obj = create_fs_object(scope)?;
 
     // Attach the fs object to the context
-    let fs_key = v8::String::new(scope, "fs").ok_or("Failed to create 'fs' key")?;
+    let fs_key = v8::String::new(scope, "fs").ok_or(io_error("Failed to create 'fs' key"))?;
     ctx_obj.set(scope, fs_key.into(), fs_obj.into());
 
     Ok(ctx_obj)
@@ -38,34 +38,22 @@ pub fn create_context_with_fs<'s>(
 fn create_fs_object<'s>(
     scope: &mut v8::HandleScope<'s>,
 ) -> Result<v8::Local<'s, v8::Object>, Box<dyn std::error::Error + Send + Sync>> {
-    let fs_obj = v8::Object::new(scope);
+    let code = v8::String::new(scope, "globalThis.__mikofiaCreateFs()")
+        .ok_or(io_error("Failed to create fs factory source"))?;
+    let script =
+        v8::Script::compile(scope, code, None).ok_or(io_error("Failed to compile fs factory"))?;
+    let result = script
+        .run(scope)
+        .ok_or(io_error("Failed to evaluate fs factory"))?;
 
-    // Add placeholder comment - actual ops are registered globally via Deno.core.ops
-    // The JavaScript code will access ops like:
-    // - Deno.core.ops.op_read_file(path)
-    // - Deno.core.ops.op_read_json(path)
-    // - Deno.core.ops.op_exists(path)
-    //
-    // We create wrapper functions here for a cleaner API
-    let _read_file_src = r#"
-        async function readFile(path) {
-            return await Deno.core.ops.op_read_file(path);
-        }
-    "#;
-    let _read_json_src = r#"
-        async function readJson(path) {
-            return await Deno.core.ops.op_read_json(path);
-        }
-    "#;
-    let _exists_src = r#"
-        function exists(path) {
-            return Deno.core.ops.op_exists(path) === 1;
-        }
-    "#;
+    result
+        .try_into()
+        .map_err(|_| io_error("fs factory did not return an object"))
+}
 
-    // Note: These functions need to be evaluated and attached to the fs object
-    // For now, we'll return an empty object and document that fs operations
-    // should be accessed via Deno.core.ops directly in JavaScript rules
-
-    Ok(fs_obj)
+fn io_error(message: &str) -> Box<dyn std::error::Error + Send + Sync> {
+    Box::new(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        message.to_string(),
+    ))
 }

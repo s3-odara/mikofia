@@ -153,8 +153,7 @@ mod tests {
         let global_patterns = vec!["node_modules".to_string(), "target".to_string()];
         let local_patterns = vec!["*.log".to_string(), "temp".to_string()];
 
-        let matcher =
-            IgnoreMatcher::from_multiple(&[&global_patterns, &local_patterns]).unwrap();
+        let matcher = IgnoreMatcher::from_multiple(&[&global_patterns, &local_patterns]).unwrap();
 
         // Global patterns should work
         assert!(matcher.is_ignored(Path::new("node_modules")));

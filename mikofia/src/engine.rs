@@ -94,7 +94,14 @@ fn check_node_with_patterns<F: FileSystem>(
         .chain(prefixed_node_patterns.iter().cloned())
         .collect();
 
-    check_node(node, workspace_root, root, fs, &combined_matcher, &child_patterns)
+    check_node(
+        node,
+        workspace_root,
+        root,
+        fs,
+        &combined_matcher,
+        &child_patterns,
+    )
 }
 
 fn check_node<F: FileSystem>(
@@ -107,7 +114,14 @@ fn check_node<F: FileSystem>(
 ) -> Vec<Violation> {
     // Check if path is a glob pattern
     if node.is_glob_pattern() {
-        return check_glob_node(node, workspace_root, root, fs, ignore, patterns_for_children);
+        return check_glob_node(
+            node,
+            workspace_root,
+            root,
+            fs,
+            ignore,
+            patterns_for_children,
+        );
     }
 
     // Regular path checking
@@ -198,7 +212,14 @@ fn check_glob_node<F: FileSystem>(
                 .check_existence()
                 .check_kind(fs)
                 .check_directory_with(|n, p| {
-                    check_directory_violations(n, p, workspace_root, fs, ignore, patterns_for_children)
+                    check_directory_violations(
+                        n,
+                        p,
+                        workspace_root,
+                        fs,
+                        ignore,
+                        patterns_for_children,
+                    )
                 })
                 .violations()
                 .into_iter()

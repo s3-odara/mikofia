@@ -14,11 +14,13 @@ pub struct DenoRuntime {
 impl DenoRuntime {
     /// Create a new Deno runtime with mikofia extensions
     pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let js_runtime = JsRuntime::new(RuntimeOptions {
+        let mut js_runtime = JsRuntime::new(RuntimeOptions {
             module_loader: Some(Rc::new(FsModuleLoader)),
             extensions: vec![crate::ops::init_ops()],
             ..Default::default()
         });
+
+        Self::initialize_js_environment(&mut js_runtime)?;
 
         Ok(Self { js_runtime })
     }
@@ -29,7 +31,10 @@ impl DenoRuntime {
         I: IntoIterator<Item = P>,
         P: AsRef<Path>,
     {
-        let collected: Vec<PathBuf> = roots.into_iter().map(|p| p.as_ref().to_path_buf()).collect();
+        let collected: Vec<PathBuf> = roots
+            .into_iter()
+            .map(|p| p.as_ref().to_path_buf())
+            .collect();
         if collected.is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -51,9 +56,8 @@ impl DenoRuntime {
         path: &Path,
     ) -> Result<Config, Box<dyn std::error::Error + Send + Sync>> {
         if let Some(parent) = path.parent() {
-            self.set_allowed_roots([parent]).map_err(|e| {
-                format!("Failed to configure allowed paths for config: {}", e)
-            })?;
+            self.set_allowed_roots([parent])
+                .map_err(|e| format!("Failed to configure allowed paths for config: {}", e))?;
         }
 
         // Convert path to module specifier
@@ -89,9 +93,8 @@ impl DenoRuntime {
         Box<dyn std::error::Error + Send + Sync>,
     > {
         if let Some(parent) = path.parent() {
-            self.set_allowed_roots([parent]).map_err(|e| {
-                format!("Failed to configure allowed paths for config: {}", e)
-            })?;
+            self.set_allowed_roots([parent])
+                .map_err(|e| format!("Failed to configure allowed paths for config: {}", e))?;
         }
 
         // Convert path to module specifier
@@ -314,7 +317,8 @@ impl DenoRuntime {
         // Convert context to V8 object in a separate scope
         let ctx_global = {
             let scope = &mut self.js_runtime.handle_scope();
-            let ctx_value = crate::context::context_to_v8(scope, ctx)?;
+            let ctx_object = crate::context::create_context_with_fs(scope, ctx)?;
+            let ctx_value: v8::Local<v8::Value> = ctx_object.into();
             v8::Global::new(scope, ctx_value)
         };
 
@@ -335,5 +339,101 @@ impl DenoRuntime {
         };
 
         Ok(rule_result)
+    }
+
+    fn initialize_js_environment(
+        js_runtime: &mut JsRuntime,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let token = {
+            let op_state_rc = js_runtime.op_state();
+            let op_state = op_state_rc.borrow();
+            let allowed_paths = op_state.borrow::<crate::ops::AllowedPaths>();
+            allowed_paths.token().to_owned()
+        };
+
+        let token_literal = serde_json::to_string(&token)?;
+
+        let init_source = format!(
+            r#"(function (globalThis) {{
+                const ops = Deno.core.ops;
+                const TOKEN = {token_literal};
+
+                function ensureString(path) {{
+                    if (typeof path !== "string") {{
+                        throw new TypeError("Path must be a string");
+                    }}
+                }}
+
+                function createFs() {{
+                    return Object.freeze({{
+                        async readFile(path) {{
+                            ensureString(path);
+                            return await ops.op_read_file(TOKEN, path);
+                        }},
+                        async readJson(path) {{
+                            ensureString(path);
+                            return await ops.op_read_json(TOKEN, path);
+                        }},
+                        exists(path) {{
+                            ensureString(path);
+                            return ops.op_exists(TOKEN, path) === 1;
+                        }}
+                    }});
+                }}
+
+                Object.defineProperty(globalThis, "__mikofiaCreateFs", {{
+                    value: createFs,
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                }});
+
+                const ERROR_MESSAGE = "Direct access to Deno.core ops is disabled. Use ctx.fs helpers instead.";
+
+                const originalReadFile = ops.op_read_file;
+                Object.defineProperty(ops, "op_read_file", {{
+                    value(token, path) {{
+                        if (token !== TOKEN || typeof path !== "string") {{
+                            throw new Error(ERROR_MESSAGE);
+                        }}
+                        return originalReadFile(token, path);
+                    }},
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                }});
+
+                const originalReadJson = ops.op_read_json;
+                Object.defineProperty(ops, "op_read_json", {{
+                    value(token, path) {{
+                        if (token !== TOKEN || typeof path !== "string") {{
+                            throw new Error(ERROR_MESSAGE);
+                        }}
+                        return originalReadJson(token, path);
+                    }},
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                }});
+
+                const originalExists = ops.op_exists;
+                Object.defineProperty(ops, "op_exists", {{
+                    value(token, path) {{
+                        if (token !== TOKEN || typeof path !== "string") {{
+                            throw new Error(ERROR_MESSAGE);
+                        }}
+                        return originalExists(token, path);
+                    }},
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                }});
+            }})(globalThis);"#,
+            token_literal = token_literal
+        );
+
+        js_runtime.execute_script("<mikofia:init>", init_source)?;
+
+        Ok(())
     }
 }

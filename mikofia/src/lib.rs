@@ -867,17 +867,15 @@ mod tests {
                     path: "web".to_string(),
                     existence: Existence::Required,
                     kind: NodeKind::Directory,
-                    children: vec![
-                        Node {
-                            path: "src".to_string(),
-                            existence: Existence::Required,
-                            kind: NodeKind::Directory,
-                            children: vec![],
-                            strict: None,
-                            ignore: vec![],
-                            rules: vec![],
-                        },
-                    ],
+                    children: vec![Node {
+                        path: "src".to_string(),
+                        existence: Existence::Required,
+                        kind: NodeKind::Directory,
+                        children: vec![],
+                        strict: None,
+                        ignore: vec![],
+                        rules: vec![],
+                    }],
                     strict: Some(true),
                     // This should ignore apps/web/dist but NOT apps/api/dist
                     ignore: vec!["dist".to_string()],
@@ -902,7 +900,11 @@ mod tests {
 
         // apps/web/dist should be ignored due to node-level ignore
         // apps/api/dist should be reported as unlisted-child
-        assert_eq!(violations.len(), 1, "expected one violation for apps/api/dist");
+        assert_eq!(
+            violations.len(),
+            1,
+            "expected one violation for apps/api/dist"
+        );
         assert_eq!(violations[0].key, "unlisted-child");
         assert!(
             violations[0].path.contains("apps/api/dist"),
@@ -925,7 +927,10 @@ mod tests {
         //     Input.test.tsx
         mock_fs.add_dir(root.join("src"));
         mock_fs.add_dir(root.join("src/components"));
-        mock_fs.add_file(root.join("src/components/Button.tsx"), "export const Button");
+        mock_fs.add_file(
+            root.join("src/components/Button.tsx"),
+            "export const Button",
+        );
         mock_fs.add_file(root.join("src/components/Button.test.tsx"), "test(...)");
         mock_fs.add_file(root.join("src/components/Input.tsx"), "export const Input");
         mock_fs.add_file(root.join("src/components/Input.test.tsx"), "test(...)");
@@ -938,17 +943,15 @@ mod tests {
                 path: "components".to_string(),
                 existence: Existence::Required,
                 kind: NodeKind::Directory,
-                children: vec![
-                    Node {
-                        path: "*.tsx".to_string(),
-                        existence: Existence::Optional,
-                        kind: NodeKind::File,
-                        children: vec![],
-                        strict: None,
-                        ignore: vec![],
-                        rules: vec![],
-                    },
-                ],
+                children: vec![Node {
+                    path: "*.tsx".to_string(),
+                    existence: Existence::Optional,
+                    kind: NodeKind::File,
+                    children: vec![],
+                    strict: None,
+                    ignore: vec![],
+                    rules: vec![],
+                }],
                 strict: Some(true),
                 // Ignore all test files in components directory
                 ignore: vec!["*.test.tsx".to_string()],
@@ -995,17 +998,15 @@ mod tests {
                 path: "lib".to_string(),
                 existence: Existence::Required,
                 kind: NodeKind::Directory,
-                children: vec![
-                    Node {
-                        path: "utils.ts".to_string(),
-                        existence: Existence::Required,
-                        kind: NodeKind::File,
-                        children: vec![],
-                        strict: None,
-                        ignore: vec![],
-                        rules: vec![],
-                    },
-                ],
+                children: vec![Node {
+                    path: "utils.ts".to_string(),
+                    existence: Existence::Required,
+                    kind: NodeKind::File,
+                    children: vec![],
+                    strict: None,
+                    ignore: vec![],
+                    rules: vec![],
+                }],
                 strict: Some(true),
                 // This should ignore *.test.ts in lib directory
                 ignore: vec!["*.test.ts".to_string()],

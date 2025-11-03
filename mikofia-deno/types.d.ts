@@ -57,6 +57,18 @@ export interface EvaluationContext {
   parent?: ParentInfo;
   /** List of sibling files and directories */
   siblings: SiblingInfo[];
+  /**
+   * Safe filesystem helpers scoped to the project root.
+   * Use these helpers instead of accessing Deno.core.ops directly.
+   */
+  fs: {
+    /** Read a UTF-8 text file */
+    readFile(path: string): Promise<string>;
+    /** Read and parse a JSON file */
+    readJson(path: string): Promise<unknown>;
+    /** Check whether a file or directory exists */
+    exists(path: string): boolean;
+  };
 }
 
 /**

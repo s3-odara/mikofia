@@ -434,4 +434,106 @@ mod tests {
             violation.path
         );
     }
+
+    #[tokio::test]
+    async fn test_ctx_fs_read_file_available() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+
+        let config_path = root.join("mikofia.config.js");
+        let config_content = r#"
+            export default {
+                nodes: [
+                    {
+                        path: "src/file.txt",
+                        existence: "required",
+                        kind: "file",
+                        rules: [
+                            async (ctx) => {
+                                const content = await ctx.fs.readFile(ctx.path);
+                                if (content.trim() !== "hello") {
+                                    return {
+                                        type: "fail",
+                                        violation: {
+                                            key: "unexpected-content",
+                                            message: `Unexpected content: ${content}`
+                                        }
+                                    };
+                                }
+                                return { type: "pass" };
+                            }
+                        ]
+                    }
+                ]
+            };
+        "#;
+
+        fs::write(&config_path, config_content).unwrap();
+
+        let src_dir = root.join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::write(src_dir.join("file.txt"), "hello\n").unwrap();
+
+        let mut runtime = DenoRuntime::new().unwrap();
+        let (config, rules_map) = runtime.load_config_with_rules(&config_path).await.unwrap();
+
+        let violations = check_with_javascript_rules(config, root, rules_map, &mut runtime)
+            .await
+            .unwrap();
+
+        assert!(
+            violations.is_empty(),
+            "expected ctx.fs.readFile to succeed, got violations: {:?}",
+            violations
+        );
+    }
+
+    #[tokio::test]
+    async fn test_direct_deno_core_ops_access_denied() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+
+        let config_path = root.join("mikofia.config.js");
+        let config_content = r#"
+            export default {
+                nodes: [
+                    {
+                        path: "src/file.txt",
+                        existence: "required",
+                        kind: "file",
+                        rules: [
+                            (ctx) => {
+                                Deno.core.ops.op_read_file(ctx.path);
+                                return { type: "pass" };
+                            }
+                        ]
+                    }
+                ]
+            };
+        "#;
+
+        fs::write(&config_path, config_content).unwrap();
+
+        let src_dir = root.join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::write(src_dir.join("file.txt"), "hello\n").unwrap();
+
+        let mut runtime = DenoRuntime::new().unwrap();
+        let (config, rules_map) = runtime.load_config_with_rules(&config_path).await.unwrap();
+
+        let violations = check_with_javascript_rules(config, root, rules_map, &mut runtime)
+            .await
+            .unwrap();
+
+        assert_eq!(violations.len(), 1);
+        let violation = &violations[0];
+        assert_eq!(violation.key, "rule-execution-error");
+        assert!(
+            violation
+                .message
+                .contains("Direct access to Deno.core ops is disabled"),
+            "unexpected violation message: {}",
+            violation.message
+        );
+    }
 }

@@ -4159,6 +4159,7 @@ dependencies = [
  "deno_runtime",
  "globset",
  "mikofia",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "tempfile",

@@ -12,6 +12,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
 mikofia = { path = "../mikofia" }
+rand = "0.8"
 
 [dev-dependencies]
 tempfile = "3"
