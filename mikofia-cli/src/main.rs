@@ -44,7 +44,7 @@ async fn main() {
     // Determine the directory to check
     let check_dir = args.dir.unwrap_or_else(|| current_dir.clone());
 
-    // Find config file: check both .js and .json if not specified
+    // Find config file: check .ts, .js, and .json if not specified
     let config_path = match args.config {
         Some(path) => {
             if path.is_absolute() {
@@ -54,21 +54,25 @@ async fn main() {
             }
         }
         None => {
-            // Try mikofia.config.js first, then mikofia.config.json
-            let js_path = check_dir.join("mikofia.config.js");
-            let json_path = check_dir.join("mikofia.config.json");
+            // Try in order: .ts → .js → .json (TypeScript preferred)
+            let candidates = ["mikofia.config.ts", "mikofia.config.js", "mikofia.config.json"];
 
-            if js_path.exists() {
-                js_path
-            } else if json_path.exists() {
-                json_path
-            } else {
-                eprintln!("❌ Config file not found");
-                eprintln!("   Looked for:");
-                eprintln!("   - {}", js_path.display());
-                eprintln!("   - {}", json_path.display());
-                eprintln!("\n   Create a config file or specify a path with --config");
-                process::exit(2);
+            let found = candidates
+                .iter()
+                .map(|name| check_dir.join(name))
+                .find(|path| path.exists());
+
+            match found {
+                Some(path) => path,
+                None => {
+                    eprintln!("❌ Config file not found");
+                    eprintln!("   Looked for:");
+                    for candidate in &candidates {
+                        eprintln!("   - {}", check_dir.join(candidate).display());
+                    }
+                    eprintln!("\n   Create a config file or specify a path with --config");
+                    process::exit(2);
+                }
             }
         }
     };
