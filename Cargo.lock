@@ -4344,6 +4344,7 @@ dependencies = [
  "mikofia",
  "mikofia-deno",
  "predicates",
+ "serde_json",
  "tempfile",
  "tokio",
 ]

@@ -33,7 +33,7 @@ impl Node {
     /// If strict is explicitly set, use that value
     /// Otherwise, default to true if children exist, false if not
     pub fn is_strict(&self) -> bool {
-        self.strict.unwrap_or_else(|| !self.children.is_empty())
+        self.strict.unwrap_or(!self.children.is_empty())
     }
 
     /// Check whether the path uses glob syntax understood by `globset`

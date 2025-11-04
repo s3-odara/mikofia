@@ -88,9 +88,9 @@ async function requireCorrespondingTest(ctx) {
     .replace(/\/src\//, "/tests/")
     .replace(/\.ts$/, ".test.ts");
 
-  // Check if test file exists using Deno ops
+  // Check if test file exists using safe fs API
   try {
-    const exists = await Deno.core.ops.op_exists(testFilePath);
+    const exists = ctx.fs.exists(testFilePath);
     if (!exists) {
       return {
         type: "fail",

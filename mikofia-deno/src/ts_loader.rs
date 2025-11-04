@@ -32,7 +32,7 @@ impl ModuleLoader for TsModuleLoader {
         referrer: &str,
         _kind: ResolutionKind,
     ) -> Result<ModuleSpecifier, ModuleLoaderError> {
-        deno_core::resolve_import(specifier, referrer).map_err(|e| ModuleLoaderError::from(e))
+        deno_core::resolve_import(specifier, referrer).map_err(ModuleLoaderError::from)
     }
 
     fn load(
@@ -60,10 +60,7 @@ impl ModuleLoader for TsModuleLoader {
 
             // Convert URL to file path
             let path = module_specifier.to_file_path().map_err(|_| {
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Invalid file path: {}", module_specifier),
-                )
+                std::io::Error::other(format!("Invalid file path: {}", module_specifier))
             })?;
 
             // Determine media type from extension
@@ -84,10 +81,7 @@ impl ModuleLoader for TsModuleLoader {
 
             // Read file contents
             let code = std::fs::read_to_string(&path).map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed to read file {}: {}", path.display(), e),
-                )
+                std::io::Error::other(format!("Failed to read file {}: {}", path.display(), e))
             })?;
 
             // Transpile if needed
@@ -100,12 +94,7 @@ impl ModuleLoader for TsModuleLoader {
                     scope_analysis: false,
                     maybe_syntax: None,
                 })
-                .map_err(|e| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Failed to parse TypeScript: {}", e),
-                    )
-                })?;
+                .map_err(|e| std::io::Error::other(format!("Failed to parse TypeScript: {}", e)))?;
 
                 // Configure emit options for better debugging support
                 // - Inline source maps for mapping JS errors back to TS source
@@ -119,10 +108,7 @@ impl ModuleLoader for TsModuleLoader {
                 let transpiled = parsed
                     .transpile(&Default::default(), &Default::default(), &emit_options)
                     .map_err(|e| {
-                        std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            format!("Failed to transpile TypeScript: {}", e),
-                        )
+                        std::io::Error::other(format!("Failed to transpile TypeScript: {}", e))
                     })?
                     .into_source();
 

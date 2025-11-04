@@ -624,6 +624,43 @@ mod tests {
     }
 
     #[test]
+    fn test_mock_fs_strict_directory_allows_multilevel_glob_children() {
+        let root = mock_root();
+        let mut mock_fs = MockFileSystem::new();
+        mock_fs.add_dir(root.join("src"));
+        mock_fs.add_dir(root.join("src/nested"));
+        mock_fs.add_dir(root.join("src/nested/deep"));
+        mock_fs.add_file(
+            root.join("src/nested/deep/index.ts"),
+            "export const value = 1;",
+        );
+
+        let nodes = vec![Node {
+            path: "src".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::Directory,
+            children: vec![Node {
+                path: "nested/**/*.ts".to_string(),
+                existence: Existence::Optional,
+                kind: NodeKind::File,
+                children: vec![],
+                strict: None,
+                ignore: vec![],
+                rules: vec![],
+            }],
+            strict: Some(true),
+            ignore: vec![],
+            rules: vec![],
+        }];
+
+        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        assert!(
+            violations.is_empty(),
+            "expected strict mode to allow nested/**/*.ts, violations: {violations:?}"
+        );
+    }
+
+    #[test]
     fn test_mock_fs_glob_violation_uses_absolute_path() {
         let root = mock_root();
         let mut mock_fs = MockFileSystem::new();

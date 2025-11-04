@@ -4,6 +4,15 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+/// Type alias for JavaScript rule handles grouped by node path
+type RulesMap = Vec<(String, Vec<crate::rules::JavaScriptRuleHandle>)>;
+
+/// Type alias for the result of loading config with rules
+type ConfigWithRulesResult = Result<(Config, RulesMap), Box<dyn std::error::Error + Send + Sync>>;
+
+/// Type alias for the result of loading rules from a node
+type RulesResult = Result<RulesMap, Box<dyn std::error::Error + Send + Sync>>;
+
 /// Deno runtime wrapper for executing JavaScript/TypeScript rules
 pub struct DenoRuntime {
     js_runtime: JsRuntime,
@@ -142,16 +151,7 @@ impl DenoRuntime {
     }
 
     /// Extract config and rule functions from module
-    fn extract_config_and_rules(
-        &mut self,
-        module_id: ModuleId,
-    ) -> Result<
-        (
-            Config,
-            Vec<(String, Vec<crate::rules::JavaScriptRuleHandle>)>,
-        ),
-        Box<dyn std::error::Error + Send + Sync>,
-    > {
+    fn extract_config_and_rules(&mut self, module_id: ModuleId) -> ConfigWithRulesResult {
         // Get the module namespace object
         let module_namespace = self.js_runtime.get_module_namespace(module_id)?;
 
@@ -193,10 +193,7 @@ impl DenoRuntime {
     fn extract_rules_from_nodes(
         scope: &mut v8::HandleScope,
         config_obj: v8::Local<v8::Value>,
-    ) -> Result<
-        Vec<(String, Vec<crate::rules::JavaScriptRuleHandle>)>,
-        Box<dyn std::error::Error + Send + Sync>,
-    > {
+    ) -> RulesResult {
         let mut rules_map = Vec::new();
 
         // Get the config object
@@ -252,40 +249,40 @@ impl DenoRuntime {
 
         // Extract rules from this node
         let rules_key = v8::String::new(scope, "rules").ok_or("Failed to create 'rules' string")?;
-        if let Some(rules) = node_obj.get(scope, rules_key.into()) {
-            if rules.is_array() {
-                let rules_array: v8::Local<v8::Array> = rules.try_into().unwrap();
-                let len = rules_array.length();
-                let mut node_rules = Vec::new();
+        if let Some(rules) = node_obj.get(scope, rules_key.into())
+            && rules.is_array()
+        {
+            let rules_array: v8::Local<v8::Array> = rules.try_into().unwrap();
+            let len = rules_array.length();
+            let mut node_rules = Vec::new();
 
-                for i in 0..len {
-                    if let Some(rule_fn) = rules_array.get_index(scope, i) {
-                        if rule_fn.is_function() {
-                            let func: v8::Local<v8::Function> = rule_fn.try_into().unwrap();
-                            let handle = crate::rules::JavaScriptRuleHandle::new(scope, func);
-                            node_rules.push(handle);
-                        }
-                    }
+            for i in 0..len {
+                if let Some(rule_fn) = rules_array.get_index(scope, i)
+                    && rule_fn.is_function()
+                {
+                    let func: v8::Local<v8::Function> = rule_fn.try_into().unwrap();
+                    let handle = crate::rules::JavaScriptRuleHandle::new(scope, func);
+                    node_rules.push(handle);
                 }
+            }
 
-                if !node_rules.is_empty() {
-                    rules_map.push((full_path.clone(), node_rules));
-                }
+            if !node_rules.is_empty() {
+                rules_map.push((full_path.clone(), node_rules));
             }
         }
 
         // Process children
         let children_key =
             v8::String::new(scope, "children").ok_or("Failed to create 'children' string")?;
-        if let Some(children) = node_obj.get(scope, children_key.into()) {
-            if children.is_array() {
-                let children_array: v8::Local<v8::Array> = children.try_into().unwrap();
-                let len = children_array.length();
+        if let Some(children) = node_obj.get(scope, children_key.into())
+            && children.is_array()
+        {
+            let children_array: v8::Local<v8::Array> = children.try_into().unwrap();
+            let len = children_array.length();
 
-                for i in 0..len {
-                    if let Some(child) = children_array.get_index(scope, i) {
-                        Self::extract_rules_from_node(scope, child, &full_path, rules_map)?;
-                    }
+            for i in 0..len {
+                if let Some(child) = children_array.get_index(scope, i) {
+                    Self::extract_rules_from_node(scope, child, &full_path, rules_map)?;
                 }
             }
         }

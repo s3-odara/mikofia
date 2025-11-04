@@ -1,206 +1,77 @@
-use clap::Parser;
-use std::path::{Path, PathBuf};
+use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 use std::process;
 
-use mikofia::Reporter;
-
-/// Configuration file type based on extension
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ConfigType {
-    /// Deno-based config (.js, .ts)
-    Deno,
-    /// JSON config (.json)
-    Json,
-}
-
-/// Pure function to determine config type from file extension
-fn config_type_from_extension(ext: &str) -> Option<ConfigType> {
-    let is_deno = ["js", "ts"]
-        .iter()
-        .any(|candidate| ext.eq_ignore_ascii_case(candidate));
-
-    if is_deno {
-        Some(ConfigType::Deno)
-    } else if ext.eq_ignore_ascii_case("json") {
-        Some(ConfigType::Json)
-    } else {
-        None
-    }
-}
+mod commands;
+mod templates;
 
 #[derive(Parser, Debug)]
 #[command(name = "mikofia")]
 #[command(version, about = "A file structure validation tool", long_about = None)]
-struct Args {
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
     /// Path to the configuration file (supports .json, .js, and .ts)
-    #[arg(short, long)]
+    /// Only used when no subcommand is specified (defaults to 'check')
+    #[arg(short, long, global = true)]
     config: Option<PathBuf>,
 
     /// Directory to check (defaults to current directory)
-    #[arg(short, long)]
+    /// Only used when no subcommand is specified (defaults to 'check')
+    #[arg(short, long, global = true)]
     dir: Option<PathBuf>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Check the file structure against the configuration
+    Check {
+        /// Path to the configuration file (supports .json, .js, and .ts)
+        #[arg(short, long)]
+        config: Option<PathBuf>,
+
+        /// Directory to check (defaults to current directory)
+        #[arg(short, long)]
+        dir: Option<PathBuf>,
+    },
+    /// Initialize a new mikofia configuration file
+    Init {
+        /// Configuration format (ts, js, or json)
+        #[arg(short, long, default_value = "ts")]
+        format: templates::ConfigFormat,
+
+        /// Custom config file path
+        #[arg(short, long)]
+        config: Option<PathBuf>,
+
+        /// Directory to create config in (defaults to current directory)
+        #[arg(short, long)]
+        dir: Option<PathBuf>,
+
+        /// Overwrite existing config file without prompting
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let args = Args::parse();
+    let cli = Cli::parse();
 
-    let current_dir = std::env::current_dir().unwrap();
-
-    // Determine the directory to check
-    let check_dir = args.dir.unwrap_or_else(|| current_dir.clone());
-
-    // Find config file: check .ts, .js, and .json if not specified
-    let config_path = match args.config {
-        Some(path) => {
-            if path.is_absolute() {
-                path
-            } else {
-                check_dir.join(&path)
-            }
-        }
+    let exit_code = match cli.command {
+        Some(Commands::Check { config, dir }) => commands::check::run(config, dir).await,
+        Some(Commands::Init {
+            format,
+            config,
+            dir,
+            force,
+        }) => commands::init::run(format, config, dir, force).await,
         None => {
-            // Try in order: .ts → .js → .json (TypeScript preferred)
-            let candidates = [
-                "mikofia.config.ts",
-                "mikofia.config.js",
-                "mikofia.config.json",
-            ];
-
-            let found = candidates
-                .iter()
-                .map(|name| check_dir.join(name))
-                .find(|path| path.exists());
-
-            match found {
-                Some(path) => path,
-                None => {
-                    eprintln!("❌ Config file not found");
-                    eprintln!("   Looked for:");
-                    for candidate in &candidates {
-                        eprintln!("   - {}", check_dir.join(candidate).display());
-                    }
-                    eprintln!("\n   Create a config file or specify a path with --config");
-                    process::exit(2);
-                }
-            }
+            // No subcommand specified, default to 'check' with global flags
+            commands::check::run(cli.config, cli.dir).await
         }
     };
 
-    if !config_path.exists() {
-        eprintln!("❌ Config file not found: {}", config_path.display());
-        eprintln!("   Create a config file or specify a different path with --config");
-        process::exit(2);
-    }
-
-    // Load config file and run checks based on extension
-    println!("🚀 Running mikofia check...\n");
-    println!("📁 Directory: {}", check_dir.display());
-    println!("⚙️  Config: {}\n", config_path.display());
-
-    let raw_extension = config_path.extension().and_then(|s| s.to_str());
-    let config_type = raw_extension.and_then(config_type_from_extension);
-
-    if raw_extension.is_some() && config_type.is_none() {
-        eprintln!(
-            "❌ Unsupported config file extension: .{}",
-            raw_extension.unwrap()
-        );
-        process::exit(2);
-    }
-
-    let violations = match config_type {
-        Some(ConfigType::Deno) => {
-            // Load Deno config (JavaScript/TypeScript) with custom rules
-            let mut runtime = match mikofia_deno::DenoRuntime::new() {
-                Ok(rt) => rt,
-                Err(e) => {
-                    eprintln!("❌ Failed to initialize Deno runtime: {}", e);
-                    process::exit(2);
-                }
-            };
-
-            let (config, rules_map) = match runtime.load_config_with_rules(&config_path).await {
-                Ok(result) => result,
-                Err(e) => {
-                    eprintln!("❌ Failed to load config: {}", e);
-                    process::exit(2);
-                }
-            };
-
-            // Run checks with JavaScript rules
-            match mikofia_deno::check_with_javascript_rules(
-                config,
-                &check_dir,
-                rules_map,
-                &mut runtime,
-            )
-            .await
-            {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("❌ Failed to run checks: {}", e);
-                    process::exit(2);
-                }
-            }
-        }
-        Some(ConfigType::Json) | None => {
-            // Load JSON config
-            let config = match load_config(&config_path).await {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("❌ Failed to load config: {}", e);
-                    process::exit(2);
-                }
-            };
-
-            // Create ignore matcher from config
-            let ignore_matcher = match mikofia::IgnoreMatcher::new(&config.ignore) {
-                Ok(m) => m,
-                Err(e) => {
-                    eprintln!("❌ Failed to create ignore matcher: {}", e);
-                    process::exit(2);
-                }
-            };
-
-            // Run standard checks
-            mikofia::check_with_ignore(&config.nodes, &check_dir, &ignore_matcher)
-        }
-    };
-
-    // Convert violations to results and report
-    let results = mikofia::violations_to_results(&violations);
-    let reporter = mikofia::ConsoleReporter;
-    reporter.report(&results);
-
-    // Exit with appropriate code
-    if violations.is_empty() {
-        process::exit(0);
-    } else {
-        process::exit(1);
-    }
-}
-
-/// Load configuration from JSON or Deno-based file (JavaScript/TypeScript)
-async fn load_config(
-    path: &Path,
-) -> Result<mikofia::Config, Box<dyn std::error::Error + Send + Sync>> {
-    let raw_extension = path.extension().and_then(|s| s.to_str());
-
-    match raw_extension {
-        Some(ext) => match config_type_from_extension(ext) {
-            Some(ConfigType::Deno) => {
-                // Load Deno config (JavaScript/TypeScript) using Deno runtime
-                mikofia_deno::load_deno_config(path).await
-            }
-            Some(ConfigType::Json) => {
-                // Load JSON config using existing method
-                mikofia::Config::from_file(path)
-                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-            }
-            None => Err(format!("Unsupported config file extension: .{}", ext).into()),
-        },
-        None => mikofia::Config::from_file(path)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
-    }
+    process::exit(exit_code);
 }

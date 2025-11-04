@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::fs::{self, FileSystem, RealFileSystem};
@@ -72,10 +73,11 @@ fn check_node_with_patterns<F: FileSystem>(
         .collect();
 
     // Combine parent patterns with prefixed node patterns
-    let pattern_sets: Vec<&[String]> = prefixed_node_patterns
-        .is_empty()
-        .then(|| vec![parent_patterns])
-        .unwrap_or_else(|| vec![parent_patterns, &prefixed_node_patterns]);
+    let pattern_sets: Vec<&[String]> = if prefixed_node_patterns.is_empty() {
+        vec![parent_patterns]
+    } else {
+        vec![parent_patterns, &prefixed_node_patterns]
+    };
 
     let combined_matcher = match IgnoreMatcher::from_multiple(&pattern_sets) {
         Ok(matcher) => matcher,
@@ -293,32 +295,30 @@ fn check_strict<F: FileSystem>(
         }
     };
 
-    // Split child nodes into literal names and compiled glob matchers using iterator transforms.
-    let literal_children: Vec<String> = node
-        .children
-        .iter()
-        .filter(|child| !child.is_glob_pattern())
-        .map(|child| {
-            std::path::Path::new(&child.path)
-                .components()
-                .find_map(|component| match component {
-                    std::path::Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
-                    _ => None,
-                })
-                .unwrap_or_else(|| child.path.clone())
-        })
-        .collect();
+    // Derive leading path components for children to decide which entries are allowed.
+    let mut literal_children: HashSet<String> = HashSet::new();
+    let mut glob_matchers = Vec::new();
 
-    let glob_matchers: Vec<_> = node
-        .children
-        .iter()
-        .filter(|child| child.is_glob_pattern())
-        .filter_map(|child| {
-            glob::build_literal_glob(&child.path)
-                .ok()
-                .map(|glob| (child.path.as_str(), glob.compile_matcher()))
-        })
-        .collect();
+    for child in &node.children {
+        let first_component = std::path::Path::new(&child.path)
+            .components()
+            .find_map(|component| match component {
+                std::path::Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
+                _ => None,
+            })
+            .unwrap_or_else(|| child.path.clone());
+
+        if crate::glob::is_glob_pattern(&first_component) {
+            match glob::build_literal_glob(&first_component) {
+                Ok(glob) => glob_matchers.push(glob.compile_matcher()),
+                Err(_) => {
+                    literal_children.insert(first_component);
+                }
+            }
+        } else {
+            literal_children.insert(first_component);
+        }
+    }
 
     // Find unlisted items
     actual_items
@@ -334,15 +334,18 @@ fn check_strict<F: FileSystem>(
                 return false;
             }
 
-            // Check if item matches any defined pattern
-            let literal_match = literal_children.iter().any(|literal| literal == item);
-            if literal_match {
+            if literal_children.contains(item.as_str()) {
                 return false;
             }
 
-            !glob_matchers
+            if glob_matchers
                 .iter()
-                .any(|(_, matcher)| matcher.is_match(item))
+                .any(|matcher| matcher.is_match(item.as_str()))
+            {
+                return false;
+            }
+
+            true
         })
         .map(|item| {
             Violation::new(
