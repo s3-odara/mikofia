@@ -3,6 +3,46 @@ use mikofia::{AsyncRule, EvaluationContext, RuleResult};
 use std::cell::RefCell;
 use std::rc::Rc;
 
+type SharedRuntime = Rc<RefCell<Option<crate::DenoRuntime>>>;
+
+struct RuntimeLease {
+    shared: SharedRuntime,
+    runtime: Option<crate::DenoRuntime>,
+}
+
+impl RuntimeLease {
+    fn new(shared: SharedRuntime) -> Self {
+        let mut slot = shared.borrow_mut();
+        let runtime = slot
+            .take()
+            .expect("Deno runtime is already borrowed for rule execution");
+        drop(slot);
+        Self {
+            shared,
+            runtime: Some(runtime),
+        }
+    }
+
+    fn runtime(&mut self) -> &mut crate::DenoRuntime {
+        self.runtime
+            .as_mut()
+            .expect("Runtime missing while executing JavaScript rule")
+    }
+}
+
+impl Drop for RuntimeLease {
+    fn drop(&mut self) {
+        if let Some(runtime) = self.runtime.take() {
+            let mut slot = self.shared.borrow_mut();
+            debug_assert!(
+                slot.is_none(),
+                "runtime slot should be empty before returning"
+            );
+            *slot = Some(runtime);
+        }
+    }
+}
+
 /// Handle to a JavaScript validation rule function
 ///
 /// # Thread Safety
@@ -15,7 +55,7 @@ pub struct JavaScriptRuleHandle {
     /// The V8 function to call for validation
     function: v8::Global<v8::Function>,
     /// Shared runtime for executing the rule (local to creation thread)
-    runtime: Rc<RefCell<crate::DenoRuntime>>,
+    runtime: SharedRuntime,
 }
 
 impl std::fmt::Debug for JavaScriptRuleHandle {
@@ -31,7 +71,7 @@ impl JavaScriptRuleHandle {
     pub fn new(
         scope: &mut v8::HandleScope,
         function: v8::Local<v8::Function>,
-        runtime: Rc<RefCell<crate::DenoRuntime>>,
+        runtime: SharedRuntime,
     ) -> Self {
         Self {
             function: v8::Global::new(scope, function),
@@ -44,8 +84,8 @@ impl JavaScriptRuleHandle {
         &self,
         ctx: &EvaluationContext,
     ) -> Result<RuleResult, Box<dyn std::error::Error + Send + Sync>> {
-        let mut runtime = self.runtime.borrow_mut();
-        runtime.call_rule(&self.function, ctx).await
+        let mut lease = RuntimeLease::new(self.runtime.clone());
+        lease.runtime().call_rule(&self.function, ctx).await
     }
 
     /// Get a reference to the underlying V8 function global
