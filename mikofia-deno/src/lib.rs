@@ -20,10 +20,79 @@ pub async fn load_deno_config(
     path: &Path,
 ) -> Result<Config, Box<dyn std::error::Error + Send + Sync>> {
     let mut runtime = DenoRuntime::new()?;
+
+    // Allow access to config file's parent directory for imports
+    if let Some(parent) = path.parent() {
+        runtime.set_allowed_roots([parent])
+            .map_err(|e| format!("Failed to configure allowed paths: {}", e))?;
+    }
+
     runtime.load_config(path).await
 }
 
-/// Check with JavaScript custom rules
+/// Load config and check with unified flow (JavaScript rules injected into config)
+///
+/// This is the recommended way to use mikofia with Deno configs.
+/// It loads the config, extracts JavaScript rules, injects them into the config nodes,
+/// and then runs the standard check flow.
+///
+/// # Thread Safety
+///
+/// This function must be called from a `tokio::task::LocalSet` because V8 requires
+/// thread affinity. The JavaScript runtime and all rules will execute on the calling thread.
+pub async fn load_and_check(
+    config_path: &Path,
+    root: &Path,
+) -> Result<Vec<mikofia::Violation>, Box<dyn std::error::Error + Send + Sync>> {
+    use std::rc::Rc;
+    use std::cell::RefCell;
+
+    // Create runtime
+    let mut runtime = DenoRuntime::new()?;
+
+    // Configure allowed roots: both project root AND config parent directory
+    // This allows JavaScript rules to access both project files and config-relative imports
+    let mut allowed_roots = vec![root.to_path_buf()];
+    if let Some(config_parent) = config_path.parent() {
+        let config_parent = config_parent.to_path_buf();
+        // Only add if different from root
+        if config_parent != root {
+            allowed_roots.push(config_parent);
+        }
+    }
+    runtime.set_allowed_roots(allowed_roots)
+        .map_err(|e| format!("Failed to configure allowed roots: {}", e))?;
+
+    // Load config with rules (won't override allowed_roots since we set them above)
+    let (mut config, rules_map) = runtime.load_config_with_rules(config_path).await?;
+
+    // Wrap runtime in Rc<RefCell> for local sharing (enforces single-thread access)
+    let runtime_rc = Rc::new(RefCell::new(runtime));
+
+    // Inject JavaScript rules into config nodes
+    DenoRuntime::inject_rules_into_config(&mut config, rules_map, runtime_rc.clone());
+
+    // Create ignore matcher from config
+    let ignore_matcher = mikofia::IgnoreMatcher::new(&config.ignore)
+        .map_err(|e| format!("Failed to create ignore matcher: {}", e))?;
+
+    // Run unified check (includes both structure and JavaScript rules)
+    let violations = mikofia::check_with_ignore(&config.nodes, root, &ignore_matcher).await;
+
+    Ok(violations)
+}
+
+/// Check with JavaScript custom rules (Legacy API)
+///
+/// # Deprecated
+///
+/// This function is deprecated. Use `load_and_check()` instead, which provides
+/// a unified flow with automatic rule injection and execution.
+///
+/// This legacy API is kept for backward compatibility but requires manual
+/// conversion of v8::Global functions to JavaScriptRuleHandle, which is
+/// cumbersome and error-prone.
+#[deprecated(since = "0.1.0", note = "Use `load_and_check()` instead")]
 pub async fn check_with_javascript_rules(
     config: Config,
     root: &Path,
@@ -418,12 +487,7 @@ mod tests {
         let bad_file = src_dir.join("bad_file.ts");
         fs::write(&bad_file, "// demo").unwrap();
 
-        let mut runtime = DenoRuntime::new().unwrap();
-        let (config, rules_map) = runtime.load_config_with_rules(&config_path).await.unwrap();
-
-        let violations = check_with_javascript_rules(config, root, rules_map, &mut runtime)
-            .await
-            .unwrap();
+        let violations = load_and_check(&config_path, root).await.unwrap();
 
         assert_eq!(violations.len(), 1);
         let violation = &violations[0];
@@ -479,12 +543,7 @@ mod tests {
         fs::create_dir_all(&src_dir).unwrap();
         fs::write(src_dir.join("file.txt"), "hello\n").unwrap();
 
-        let mut runtime = DenoRuntime::new().unwrap();
-        let (config, rules_map) = runtime.load_config_with_rules(&config_path).await.unwrap();
-
-        let violations = check_with_javascript_rules(config, root, rules_map, &mut runtime)
-            .await
-            .unwrap();
+        let violations = load_and_check(&config_path, root).await.unwrap();
 
         assert!(
             violations.is_empty(),
@@ -523,16 +582,11 @@ mod tests {
         fs::create_dir_all(&src_dir).unwrap();
         fs::write(src_dir.join("file.txt"), "hello\n").unwrap();
 
-        let mut runtime = DenoRuntime::new().unwrap();
-        let (config, rules_map) = runtime.load_config_with_rules(&config_path).await.unwrap();
-
-        let violations = check_with_javascript_rules(config, root, rules_map, &mut runtime)
-            .await
-            .unwrap();
+        let violations = load_and_check(&config_path, root).await.unwrap();
 
         assert_eq!(violations.len(), 1);
         let violation = &violations[0];
-        assert_eq!(violation.key, "rule-execution-error");
+        assert_eq!(violation.key, "js-rule-error");
         assert!(
             violation
                 .message
@@ -633,12 +687,7 @@ mod tests {
         let test_file = src_dir.join("test_file.ts");
         fs::write(&test_file, "// demo").unwrap();
 
-        let mut runtime = DenoRuntime::new().unwrap();
-        let (config, rules_map) = runtime.load_config_with_rules(&config_path).await.unwrap();
-
-        let violations = check_with_javascript_rules(config, root, rules_map, &mut runtime)
-            .await
-            .unwrap();
+        let violations = load_and_check(&config_path, root).await.unwrap();
 
         assert_eq!(violations.len(), 1);
         let violation = &violations[0];

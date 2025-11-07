@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use futures::future::{BoxFuture, FutureExt};
+use futures::future::{LocalBoxFuture, FutureExt};
 
 use crate::fs::{self, FileSystem, RealFileSystem};
 use crate::glob;
@@ -54,7 +54,7 @@ fn check_node_with_patterns<'a, F: FileSystem>(
     root: &'a Path,
     fs: &'a F,
     parent_patterns: &'a [String],
-) -> BoxFuture<'a, Vec<Violation>> {
+) -> LocalBoxFuture<'a, Vec<Violation>> {
     async move {
     // Calculate this node's relative path from workspace_root
     // This is used to prefix node-level ignore patterns
@@ -114,7 +114,7 @@ fn check_node_with_patterns<'a, F: FileSystem>(
         &child_patterns,
     )
     .await
-    }.boxed()
+    }.boxed_local()
 }
 
 fn check_node<'a, F: FileSystem>(
@@ -124,7 +124,7 @@ fn check_node<'a, F: FileSystem>(
     fs: &'a F,
     ignore: &'a IgnoreMatcher,
     patterns_for_children: &'a [String],
-) -> BoxFuture<'a, Vec<Violation>> {
+) -> LocalBoxFuture<'a, Vec<Violation>> {
     async move {
     // Check if path is a glob pattern
     if node.is_glob_pattern() {
@@ -169,7 +169,7 @@ fn check_node<'a, F: FileSystem>(
     }
 
     violations
-    }.boxed()
+    }.boxed_local()
 }
 
 fn check_glob_node<'a, F: FileSystem>(
@@ -179,7 +179,7 @@ fn check_glob_node<'a, F: FileSystem>(
     fs: &'a F,
     ignore: &'a IgnoreMatcher,
     patterns_for_children: &'a [String],
-) -> BoxFuture<'a, Vec<Violation>> {
+) -> LocalBoxFuture<'a, Vec<Violation>> {
     async move {
     // Expand glob pattern
     let matched_paths = match glob::expand_glob(&node.path, root, fs) {
@@ -268,7 +268,7 @@ fn check_glob_node<'a, F: FileSystem>(
     }
 
     all_violations
-    }.boxed()
+    }.boxed_local()
 }
 
 fn check_directory_violations<'a, F: FileSystem>(
@@ -278,7 +278,7 @@ fn check_directory_violations<'a, F: FileSystem>(
     fs: &'a F,
     ignore: &'a IgnoreMatcher,
     patterns_for_children: &'a [String],
-) -> BoxFuture<'a, Vec<Violation>> {
+) -> LocalBoxFuture<'a, Vec<Violation>> {
     async move {
     let strict_violations = check_strict(node, dir_path, workspace_root, fs, ignore);
     let children_violations =
@@ -288,7 +288,7 @@ fn check_directory_violations<'a, F: FileSystem>(
         .into_iter()
         .chain(children_violations)
         .collect()
-    }.boxed()
+    }.boxed_local()
 }
 
 fn check_children<'a, F: FileSystem>(
@@ -297,7 +297,7 @@ fn check_children<'a, F: FileSystem>(
     workspace_root: &'a Path,
     fs: &'a F,
     patterns_for_children: &'a [String],
-) -> BoxFuture<'a, Vec<Violation>> {
+) -> LocalBoxFuture<'a, Vec<Violation>> {
     async move {
     let mut all_violations = Vec::new();
     for child in &node.children {
@@ -312,7 +312,7 @@ fn check_children<'a, F: FileSystem>(
         all_violations.extend(violations);
     }
     all_violations
-    }.boxed()
+    }.boxed_local()
 }
 
 fn check_strict<F: FileSystem>(

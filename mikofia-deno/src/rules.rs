@@ -1,11 +1,21 @@
 use deno_core::v8;
-use mikofia::{EvaluationContext, RuleResult};
+use mikofia::{AsyncRule, EvaluationContext, RuleResult};
+use std::rc::Rc;
+use std::cell::RefCell;
 
 /// Handle to a JavaScript validation rule function
+///
+/// # Thread Safety
+///
+/// This type is `!Send` and `!Sync` because V8 isolates have strict thread affinity.
+/// All JavaScript execution must happen on the same thread that created the runtime.
+/// Use `tokio::task::LocalSet` to ensure execution stays on the creation thread.
 #[derive(Clone)]
 pub struct JavaScriptRuleHandle {
     /// The V8 function to call for validation
     function: v8::Global<v8::Function>,
+    /// Shared runtime for executing the rule (local to creation thread)
+    runtime: Rc<RefCell<crate::DenoRuntime>>,
 }
 
 impl std::fmt::Debug for JavaScriptRuleHandle {
@@ -18,24 +28,52 @@ impl std::fmt::Debug for JavaScriptRuleHandle {
 
 impl JavaScriptRuleHandle {
     /// Create a new JavaScript rule handle from a V8 function
-    pub fn new(scope: &mut v8::HandleScope, function: v8::Local<v8::Function>) -> Self {
+    pub fn new(
+        scope: &mut v8::HandleScope,
+        function: v8::Local<v8::Function>,
+        runtime: Rc<RefCell<crate::DenoRuntime>>,
+    ) -> Self {
         Self {
             function: v8::Global::new(scope, function),
+            runtime,
         }
     }
 
     /// Call the JavaScript rule with the given evaluation context
     pub async fn call(
         &self,
-        runtime: &mut crate::DenoRuntime,
         ctx: &EvaluationContext,
     ) -> Result<RuleResult, Box<dyn std::error::Error + Send + Sync>> {
+        let mut runtime = self.runtime.borrow_mut();
         runtime.call_rule(&self.function, ctx).await
     }
 
     /// Get a reference to the underlying V8 function global
     pub fn function(&self) -> &v8::Global<v8::Function> {
         &self.function
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl AsyncRule for JavaScriptRuleHandle {
+    async fn check(&self, ctx: &EvaluationContext) -> RuleResult {
+        match self.call(ctx).await {
+            Ok(RuleResult::Fail { mut violation }) => {
+                // Fill in path if JavaScript rule didn't set it
+                if violation.path.is_empty() {
+                    violation.path = ctx.path.clone();
+                }
+                RuleResult::Fail { violation }
+            }
+            Ok(other) => other,
+            Err(e) => RuleResult::Fail {
+                violation: mikofia::Violation::new(
+                    "js-rule-error",
+                    ctx.path.clone(),
+                    format!("JavaScript rule execution failed: {}", e),
+                ),
+            },
+        }
     }
 }
 

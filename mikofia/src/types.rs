@@ -205,7 +205,7 @@ pub struct SiblingInfo {
 #[derive(Clone)]
 pub enum RuleHandle {
     Native(std::sync::Arc<dyn NativeRule>),
-    Async(std::sync::Arc<dyn AsyncRule>),
+    Async(std::rc::Rc<dyn AsyncRule>),
 }
 
 impl std::fmt::Debug for RuleHandle {
@@ -223,8 +223,12 @@ pub trait NativeRule: Send + Sync + std::fmt::Debug {
 }
 
 /// Trait for async validation rules (e.g., JavaScript rules via Deno)
-#[async_trait]
-pub trait AsyncRule: Send + Sync {
+///
+/// This trait is `!Send` because JavaScript engines like V8 have strict thread
+/// affinity and must be accessed only from the thread that created them.
+/// All validation using this trait must be executed within a `tokio::task::LocalSet`.
+#[async_trait(?Send)]
+pub trait AsyncRule {
     async fn check(&self, ctx: &EvaluationContext) -> RuleResult;
 }
 

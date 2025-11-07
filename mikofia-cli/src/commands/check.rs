@@ -144,32 +144,8 @@ pub async fn run(config: Option<PathBuf>, dir: Option<PathBuf>) -> i32 {
 
     let violations = match config_type {
         Some(ConfigType::Deno) => {
-            // Load Deno config (JavaScript/TypeScript) with custom rules
-            let mut runtime = match mikofia_deno::DenoRuntime::new() {
-                Ok(rt) => rt,
-                Err(e) => {
-                    eprintln!("❌ Failed to initialize Deno runtime: {}", e);
-                    return 2;
-                }
-            };
-
-            let (config, rules_map) = match runtime.load_config_with_rules(&config_path).await {
-                Ok(result) => result,
-                Err(e) => {
-                    eprintln!("❌ Failed to load config: {}", e);
-                    return 2;
-                }
-            };
-
-            // Run checks with JavaScript rules
-            match mikofia_deno::check_with_javascript_rules(
-                config,
-                &check_dir,
-                rules_map,
-                &mut runtime,
-            )
-            .await
-            {
+            // Load and check with unified flow (JavaScript rules injected into config)
+            match mikofia_deno::load_and_check(&config_path, &check_dir).await {
                 Ok(v) => v,
                 Err(e) => {
                     eprintln!("❌ Failed to run checks: {}", e);
