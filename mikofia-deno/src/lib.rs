@@ -84,6 +84,51 @@ pub async fn load_and_check(
     Ok(violations)
 }
 
+/// Unified interface to check a config file (JSON or Deno-based)
+///
+/// This function automatically detects the config file type by extension and routes to
+/// the appropriate loading and checking mechanism:
+/// - `.js`/`.ts`: Uses Deno runtime with JavaScript rules support
+/// - `.json`: Uses standard JSON config loading
+///
+/// This is the recommended entry point for all config-based checks.
+///
+/// # Thread Safety
+///
+/// For Deno configs (.js/.ts), this function must be called from a `tokio::task::LocalSet`
+/// because V8 requires thread affinity. JSON configs can be called from any async context.
+pub async fn check_from_config_path(
+    config_path: &Path,
+    root: &Path,
+) -> Result<Vec<mikofia::Violation>, Box<dyn std::error::Error + Send + Sync>> {
+    let extension = config_path
+        .extension()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| "Config file has no extension")?;
+
+    let is_deno = ["js", "ts"]
+        .iter()
+        .any(|&ext| extension.eq_ignore_ascii_case(ext));
+
+    if is_deno {
+        // Use Deno runtime with JavaScript rules support
+        load_and_check(config_path, root).await
+    } else if extension.eq_ignore_ascii_case("json") {
+        // Use standard JSON config loading
+        let config = Config::from_file(config_path)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+
+        let ignore_matcher = mikofia::IgnoreMatcher::new(&config.ignore)
+            .map_err(|e| format!("Failed to create ignore matcher: {}", e))?;
+
+        let violations = mikofia::check_with_ignore(&config.nodes, root, &ignore_matcher).await;
+
+        Ok(violations)
+    } else {
+        Err(format!("Unsupported config file extension: .{}", extension).into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
