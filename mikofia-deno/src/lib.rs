@@ -10,7 +10,7 @@ pub use runtime::DenoRuntime;
 pub use ts_loader::TsModuleLoader;
 
 use mikofia::Config;
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 
 /// Load a Deno-based configuration file (JavaScript or TypeScript)
 ///
@@ -23,7 +23,8 @@ pub async fn load_deno_config(
 
     // Allow access to config file's parent directory for imports
     if let Some(parent) = path.parent() {
-        runtime.set_allowed_roots([parent])
+        runtime
+            .set_allowed_roots([parent])
             .map_err(|e| format!("Failed to configure allowed paths: {}", e))?;
     }
 
@@ -44,8 +45,8 @@ pub async fn load_and_check(
     config_path: &Path,
     root: &Path,
 ) -> Result<Vec<mikofia::Violation>, Box<dyn std::error::Error + Send + Sync>> {
-    use std::rc::Rc;
     use std::cell::RefCell;
+    use std::rc::Rc;
 
     // Create runtime
     let mut runtime = DenoRuntime::new()?;
@@ -60,7 +61,8 @@ pub async fn load_and_check(
             allowed_roots.push(config_parent);
         }
     }
-    runtime.set_allowed_roots(allowed_roots)
+    runtime
+        .set_allowed_roots(allowed_roots)
         .map_err(|e| format!("Failed to configure allowed roots: {}", e))?;
 
     // Load config with rules (won't override allowed_roots since we set them above)
@@ -80,217 +82,6 @@ pub async fn load_and_check(
     let violations = mikofia::check_with_ignore(&config.nodes, root, &ignore_matcher).await;
 
     Ok(violations)
-}
-
-/// Check with JavaScript custom rules (Legacy API)
-///
-/// # Deprecated
-///
-/// This function is deprecated. Use `load_and_check()` instead, which provides
-/// a unified flow with automatic rule injection and execution.
-///
-/// This legacy API is kept for backward compatibility but requires manual
-/// conversion of v8::Global functions to JavaScriptRuleHandle, which is
-/// cumbersome and error-prone.
-#[deprecated(since = "0.1.0", note = "Use `load_and_check()` instead")]
-pub async fn check_with_javascript_rules(
-    config: Config,
-    root: &Path,
-    rules_map: Vec<(String, Vec<JavaScriptRuleHandle>)>,
-    runtime: &mut DenoRuntime,
-) -> Result<Vec<mikofia::Violation>, Box<dyn std::error::Error + Send + Sync>> {
-    use mikofia::{IgnoreMatcher, RealFileSystem};
-
-    runtime
-        .set_allowed_roots([root])
-        .map_err(|e| format!("Failed to configure project root: {}", e))?;
-
-    // Create ignore matcher from config
-    let ignore_matcher = IgnoreMatcher::new(&config.ignore)
-        .map_err(|e| format!("Failed to create ignore matcher: {}", e))?;
-
-    // 1. Run standard checks with ignore patterns
-    let mut violations = mikofia::check_with_ignore(&config.nodes, root, &ignore_matcher).await;
-
-    // 2. Run JavaScript custom rules
-    let fs = RealFileSystem;
-
-    for (pattern, rules) in rules_map {
-        // Find matching files for this pattern
-        let matched_paths = find_matching_paths(root, &pattern, &fs)?;
-
-        // Filter out ignored paths
-        let filtered_paths: Vec<PathBuf> = matched_paths
-            .into_iter()
-            .filter(|path| {
-                path.strip_prefix(root)
-                    .ok()
-                    .map(|relative| !ignore_matcher.is_ignored(relative))
-                    .unwrap_or(true)
-            })
-            .collect();
-
-        for path in filtered_paths {
-            // Build evaluation context
-            let ctx = build_evaluation_context(&path, &fs)?;
-
-            // Execute each rule
-            for rule in &rules {
-                match runtime.call_rule(rule.function(), &ctx).await {
-                    Ok(mikofia::RuleResult::Fail { mut violation }) => {
-                        // Set the path if not already set by the rule
-                        if violation.path.is_empty() {
-                            violation.path = path.to_string_lossy().to_string();
-                        }
-                        violations.push(violation);
-                    }
-                    Ok(mikofia::RuleResult::Pass) => {}
-                    Ok(mikofia::RuleResult::Skip { .. }) => {}
-                    Err(e) => {
-                        violations.push(mikofia::Violation::new(
-                            "rule-execution-error",
-                            path.to_string_lossy().to_string(),
-                            format!("Failed to execute rule: {}", e),
-                        ));
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(violations)
-}
-
-/// Find files matching a pattern
-fn find_matching_paths(
-    root: &Path,
-    pattern: &str,
-    fs: &impl mikofia::FileSystem,
-) -> Result<Vec<PathBuf>, Box<dyn std::error::Error + Send + Sync>> {
-    // If pattern contains glob syntax, use glob expansion
-    if mikofia::glob::is_glob_pattern(pattern) {
-        if let Some((literal_prefix, remainder_pattern)) = split_literal_prefix(pattern) {
-            let base_dir = root.join(&literal_prefix);
-
-            if !fs.exists(&base_dir) || !fs.is_dir(&base_dir) {
-                return Ok(vec![]);
-            }
-
-            return match mikofia::glob::expand_glob(&remainder_pattern, &base_dir, fs) {
-                Ok(paths) => Ok(paths),
-                Err(_) => Ok(vec![]),
-            };
-        }
-
-        // Use mikofia's glob expansion which is already optimized
-        match mikofia::glob::expand_glob(pattern, root, fs) {
-            Ok(paths) => Ok(paths),
-            Err(_) => Ok(vec![]), // Return empty if glob expansion fails
-        }
-    } else {
-        // Literal path
-        let full_path = root.join(pattern);
-        if fs.exists(&full_path) {
-            Ok(vec![full_path])
-        } else {
-            Ok(vec![])
-        }
-    }
-}
-
-fn split_literal_prefix(pattern: &str) -> Option<(PathBuf, String)> {
-    use globset::{GlobBuilder, escape};
-
-    let mut literal_prefix = PathBuf::new();
-    let mut remainder: Vec<String> = Vec::new();
-    let mut glob_found = false;
-
-    for component in Path::new(pattern).components() {
-        let component_str = match component {
-            Component::Normal(segment) => segment.to_string_lossy().into_owned(),
-            Component::CurDir => ".".to_string(),
-            Component::ParentDir => "..".to_string(),
-            _ => return None,
-        };
-
-        let is_glob = GlobBuilder::new(&component_str)
-            .literal_separator(true)
-            .build()
-            .map(|parsed| {
-                let escaped = escape(&component_str);
-                GlobBuilder::new(&escaped)
-                    .literal_separator(true)
-                    .build()
-                    .map(|literal| parsed.regex() != literal.regex())
-                    .unwrap_or(true)
-            })
-            .unwrap_or(true);
-
-        if !glob_found && !is_glob {
-            literal_prefix.push(&component_str);
-        } else {
-            glob_found = true;
-            remainder.push(component_str);
-        }
-    }
-
-    if literal_prefix.as_os_str().is_empty() || remainder.is_empty() {
-        None
-    } else {
-        Some((literal_prefix, remainder.join("/")))
-    }
-}
-
-/// Build evaluation context for a path
-fn build_evaluation_context(
-    path: &Path,
-    fs: &impl mikofia::FileSystem,
-) -> Result<mikofia::EvaluationContext, Box<dyn std::error::Error + Send + Sync>> {
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("")
-        .to_string();
-
-    let extension = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|s| s.to_string());
-
-    let parent = path.parent().and_then(|parent_path| {
-        parent_path.file_name().and_then(|parent_name| {
-            parent_name.to_str().map(|name_str| mikofia::ParentInfo {
-                path: parent_path.to_string_lossy().to_string(),
-                name: name_str.to_string(),
-            })
-        })
-    });
-
-    let siblings = if let Some(parent_path) = path.parent() {
-        fs.read_dir(parent_path)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|sibling_name| sibling_name != &name)
-            .map(|sibling_name| {
-                let sibling_path = parent_path.join(&sibling_name);
-                mikofia::SiblingInfo {
-                    name: sibling_name,
-                    is_file: !fs.is_dir(&sibling_path),
-                    is_directory: fs.is_dir(&sibling_path),
-                }
-            })
-            .collect()
-    } else {
-        vec![]
-    };
-
-    Ok(mikofia::EvaluationContext {
-        path: path.to_string_lossy().to_string(),
-        name,
-        extension,
-        parent,
-        siblings,
-    })
 }
 
 #[cfg(test)]
@@ -449,7 +240,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_check_with_javascript_rules_applies_custom_rule() {
+    async fn test_custom_rules_applied_through_unified_flow() {
         let temp_dir = TempDir::new().unwrap();
         let root = temp_dir.path();
 

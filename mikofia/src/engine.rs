@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use futures::future::{LocalBoxFuture, FutureExt};
+use futures::future::{FutureExt, LocalBoxFuture};
 
 use crate::fs::{self, FileSystem, RealFileSystem};
 use crate::glob;
@@ -56,65 +56,66 @@ fn check_node_with_patterns<'a, F: FileSystem>(
     parent_patterns: &'a [String],
 ) -> LocalBoxFuture<'a, Vec<Violation>> {
     async move {
-    // Calculate this node's relative path from workspace_root
-    // This is used to prefix node-level ignore patterns
-    let node_relative_path = if root == workspace_root {
-        // Top-level node: use node.path directly
-        PathBuf::from(&node.path)
-    } else {
-        // Nested node: combine root's relative path with node.path
-        match root.strip_prefix(workspace_root) {
-            Ok(root_relative) => root_relative.join(&node.path),
-            Err(_) => PathBuf::from(&node.path),
-        }
-    };
+        // Calculate this node's relative path from workspace_root
+        // This is used to prefix node-level ignore patterns
+        let node_relative_path = if root == workspace_root {
+            // Top-level node: use node.path directly
+            PathBuf::from(&node.path)
+        } else {
+            // Nested node: combine root's relative path with node.path
+            match root.strip_prefix(workspace_root) {
+                Ok(root_relative) => root_relative.join(&node.path),
+                Err(_) => PathBuf::from(&node.path),
+            }
+        };
 
-    // Prefix node's ignore patterns with its relative path from workspace_root
-    // This ensures patterns are scoped to the node's directory
-    // Example: apps/web node with ignore: ["dist"] becomes "apps/web/dist"
-    let prefixed_node_patterns: Vec<String> = node
-        .ignore
-        .iter()
-        .map(|pattern| {
-            let prefixed_path = node_relative_path.join(pattern);
-            prefixed_path.to_string_lossy().into_owned()
-        })
-        .collect();
+        // Prefix node's ignore patterns with its relative path from workspace_root
+        // This ensures patterns are scoped to the node's directory
+        // Example: apps/web node with ignore: ["dist"] becomes "apps/web/dist"
+        let prefixed_node_patterns: Vec<String> = node
+            .ignore
+            .iter()
+            .map(|pattern| {
+                let prefixed_path = node_relative_path.join(pattern);
+                prefixed_path.to_string_lossy().into_owned()
+            })
+            .collect();
 
-    // Combine parent patterns with prefixed node patterns
-    let pattern_sets: Vec<&[String]> = if prefixed_node_patterns.is_empty() {
-        vec![parent_patterns]
-    } else {
-        vec![parent_patterns, &prefixed_node_patterns]
-    };
+        // Combine parent patterns with prefixed node patterns
+        let pattern_sets: Vec<&[String]> = if prefixed_node_patterns.is_empty() {
+            vec![parent_patterns]
+        } else {
+            vec![parent_patterns, &prefixed_node_patterns]
+        };
 
-    let combined_matcher = match IgnoreMatcher::from_multiple(&pattern_sets) {
-        Ok(matcher) => matcher,
-        Err(_e) => {
-            // This should not happen because patterns are validated at config load time
-            // If it does, create an empty matcher
-            IgnoreMatcher::empty()
-        }
-    };
+        let combined_matcher = match IgnoreMatcher::from_multiple(&pattern_sets) {
+            Ok(matcher) => matcher,
+            Err(_e) => {
+                // This should not happen because patterns are validated at config load time
+                // If it does, create an empty matcher
+                IgnoreMatcher::empty()
+            }
+        };
 
-    // Build combined patterns for children
-    // Use prefixed patterns so children inherit the correct scope
-    let child_patterns: Vec<String> = parent_patterns
-        .iter()
-        .cloned()
-        .chain(prefixed_node_patterns.iter().cloned())
-        .collect();
+        // Build combined patterns for children
+        // Use prefixed patterns so children inherit the correct scope
+        let child_patterns: Vec<String> = parent_patterns
+            .iter()
+            .cloned()
+            .chain(prefixed_node_patterns.iter().cloned())
+            .collect();
 
-    check_node(
-        node,
-        workspace_root,
-        root,
-        fs,
-        &combined_matcher,
-        &child_patterns,
-    )
-    .await
-    }.boxed_local()
+        check_node(
+            node,
+            workspace_root,
+            root,
+            fs,
+            &combined_matcher,
+            &child_patterns,
+        )
+        .await
+    }
+    .boxed_local()
 }
 
 fn check_node<'a, F: FileSystem>(
@@ -126,125 +127,33 @@ fn check_node<'a, F: FileSystem>(
     patterns_for_children: &'a [String],
 ) -> LocalBoxFuture<'a, Vec<Violation>> {
     async move {
-    // Check if path is a glob pattern
-    if node.is_glob_pattern() {
-        return check_glob_node(
-            node,
-            workspace_root,
-            root,
-            fs,
-            ignore,
-            patterns_for_children,
-        )
-        .await;
-    }
-
-    // Regular path checking
-    let full_path = root.join(&node.path);
-    let exists = fs.exists(&full_path);
-
-    let mut violations = CheckPipeline::new(node, full_path.clone(), exists)
-        .check_existence()
-        .check_kind(fs)
-        .violations();
-
-    // Check directory violations if it's a directory
-    if exists && fs.is_dir(&full_path) {
-        let dir_violations = check_directory_violations(
-            node,
-            &full_path,
-            workspace_root,
-            fs,
-            ignore,
-            patterns_for_children,
-        )
-        .await;
-        violations.extend(dir_violations);
-    }
-
-    // Execute custom rules if the path exists
-    if exists {
-        let rule_violations = execute_rules(node, &full_path, fs).await;
-        violations.extend(rule_violations);
-    }
-
-    violations
-    }.boxed_local()
-}
-
-fn check_glob_node<'a, F: FileSystem>(
-    node: &'a Node,
-    workspace_root: &'a Path,
-    root: &'a Path,
-    fs: &'a F,
-    ignore: &'a IgnoreMatcher,
-    patterns_for_children: &'a [String],
-) -> LocalBoxFuture<'a, Vec<Violation>> {
-    async move {
-    // Expand glob pattern
-    let matched_paths = match glob::expand_glob(&node.path, root, fs) {
-        Ok(paths) => paths,
-        Err(glob::GlobError::Walk { error, .. }) if fs::is_permission_denied(&error) => {
-            return vec![Violation::new(
-                "permission-denied",
-                absolute_pattern(root, &node.path),
-                fs::permission_denied_message(&normalize_join(root, &node.path)),
-            )];
+        // Check if path is a glob pattern
+        if node.is_glob_pattern() {
+            return check_glob_node(
+                node,
+                workspace_root,
+                root,
+                fs,
+                ignore,
+                patterns_for_children,
+            )
+            .await;
         }
-        Err(err) => {
-            return vec![Violation::new(
-                "glob-error",
-                absolute_pattern(root, &node.path),
-                err.to_string(),
-            )];
-        }
-    };
 
-    // Filter out ignored paths
-    let filtered_paths: Vec<PathBuf> = matched_paths
-        .into_iter()
-        .filter(|path| {
-            let relative_to_root = path.strip_prefix(root);
-            let relative_to_workspace = path.strip_prefix(workspace_root);
-            let ignored_in_root_scope = relative_to_root
-                .map(|relative| ignore.is_ignored(relative))
-                .unwrap_or(false);
-            let ignored_in_workspace_scope = relative_to_workspace
-                .map(|relative| ignore.is_ignored(relative))
-                .unwrap_or(false);
+        // Regular path checking
+        let full_path = root.join(&node.path);
+        let exists = fs.exists(&full_path);
 
-            !(ignored_in_root_scope || ignored_in_workspace_scope)
-        })
-        .collect();
-
-    // If required and no matches, that's a violation
-    if filtered_paths.is_empty() {
-        if matches!(node.existence, crate::types::Existence::Required) {
-            return vec![Violation::new(
-                "no-files-match-pattern",
-                absolute_pattern(root, &node.path),
-                format!("No files match required pattern: {}", node.path),
-            )];
-        }
-        return vec![];
-    }
-
-    // Check each matched path
-    let mut all_violations = Vec::new();
-    for path in filtered_paths {
-        let exists = fs.exists(&path);
-        let display_path = to_string_path(&path);
-
-        let mut violations = CheckPipeline::new(node, path.clone(), exists)
+        let mut violations = CheckPipeline::new(node, full_path.clone(), exists)
             .check_existence()
             .check_kind(fs)
             .violations();
 
         // Check directory violations if it's a directory
-        if exists && fs.is_dir(&path) {
+        if exists && fs.is_dir(&full_path) {
             let dir_violations = check_directory_violations(
                 node,
-                &path,
+                &full_path,
                 workspace_root,
                 fs,
                 ignore,
@@ -256,19 +165,113 @@ fn check_glob_node<'a, F: FileSystem>(
 
         // Execute custom rules if the path exists
         if exists {
-            let rule_violations = execute_rules(node, &path, fs).await;
+            let rule_violations = execute_rules(node, &full_path, fs).await;
             violations.extend(rule_violations);
         }
 
-        // Update violation paths
-        for mut v in violations {
-            v.path = display_path.clone();
-            all_violations.push(v);
-        }
+        violations
     }
+    .boxed_local()
+}
 
-    all_violations
-    }.boxed_local()
+fn check_glob_node<'a, F: FileSystem>(
+    node: &'a Node,
+    workspace_root: &'a Path,
+    root: &'a Path,
+    fs: &'a F,
+    ignore: &'a IgnoreMatcher,
+    patterns_for_children: &'a [String],
+) -> LocalBoxFuture<'a, Vec<Violation>> {
+    async move {
+        // Expand glob pattern
+        let matched_paths = match glob::expand_glob(&node.path, root, fs) {
+            Ok(paths) => paths,
+            Err(glob::GlobError::Walk { error, .. }) if fs::is_permission_denied(&error) => {
+                return vec![Violation::new(
+                    "permission-denied",
+                    absolute_pattern(root, &node.path),
+                    fs::permission_denied_message(&normalize_join(root, &node.path)),
+                )];
+            }
+            Err(err) => {
+                return vec![Violation::new(
+                    "glob-error",
+                    absolute_pattern(root, &node.path),
+                    err.to_string(),
+                )];
+            }
+        };
+
+        // Filter out ignored paths
+        let filtered_paths: Vec<PathBuf> = matched_paths
+            .into_iter()
+            .filter(|path| {
+                let relative_to_root = path.strip_prefix(root);
+                let relative_to_workspace = path.strip_prefix(workspace_root);
+                let ignored_in_root_scope = relative_to_root
+                    .map(|relative| ignore.is_ignored(relative))
+                    .unwrap_or(false);
+                let ignored_in_workspace_scope = relative_to_workspace
+                    .map(|relative| ignore.is_ignored(relative))
+                    .unwrap_or(false);
+
+                !(ignored_in_root_scope || ignored_in_workspace_scope)
+            })
+            .collect();
+
+        // If required and no matches, that's a violation
+        if filtered_paths.is_empty() {
+            if matches!(node.existence, crate::types::Existence::Required) {
+                return vec![Violation::new(
+                    "no-files-match-pattern",
+                    absolute_pattern(root, &node.path),
+                    format!("No files match required pattern: {}", node.path),
+                )];
+            }
+            return vec![];
+        }
+
+        // Check each matched path
+        let mut all_violations = Vec::new();
+        for path in filtered_paths {
+            let exists = fs.exists(&path);
+            let display_path = to_string_path(&path);
+
+            let mut violations = CheckPipeline::new(node, path.clone(), exists)
+                .check_existence()
+                .check_kind(fs)
+                .violations();
+
+            // Check directory violations if it's a directory
+            if exists && fs.is_dir(&path) {
+                let dir_violations = check_directory_violations(
+                    node,
+                    &path,
+                    workspace_root,
+                    fs,
+                    ignore,
+                    patterns_for_children,
+                )
+                .await;
+                violations.extend(dir_violations);
+            }
+
+            // Execute custom rules if the path exists
+            if exists {
+                let rule_violations = execute_rules(node, &path, fs).await;
+                violations.extend(rule_violations);
+            }
+
+            // Update violation paths
+            for mut v in violations {
+                v.path = display_path.clone();
+                all_violations.push(v);
+            }
+        }
+
+        all_violations
+    }
+    .boxed_local()
 }
 
 fn check_directory_violations<'a, F: FileSystem>(
@@ -280,15 +283,16 @@ fn check_directory_violations<'a, F: FileSystem>(
     patterns_for_children: &'a [String],
 ) -> LocalBoxFuture<'a, Vec<Violation>> {
     async move {
-    let strict_violations = check_strict(node, dir_path, workspace_root, fs, ignore);
-    let children_violations =
-        check_children(node, dir_path, workspace_root, fs, patterns_for_children).await;
+        let strict_violations = check_strict(node, dir_path, workspace_root, fs, ignore);
+        let children_violations =
+            check_children(node, dir_path, workspace_root, fs, patterns_for_children).await;
 
-    strict_violations
-        .into_iter()
-        .chain(children_violations)
-        .collect()
-    }.boxed_local()
+        strict_violations
+            .into_iter()
+            .chain(children_violations)
+            .collect()
+    }
+    .boxed_local()
 }
 
 fn check_children<'a, F: FileSystem>(
@@ -299,20 +303,21 @@ fn check_children<'a, F: FileSystem>(
     patterns_for_children: &'a [String],
 ) -> LocalBoxFuture<'a, Vec<Violation>> {
     async move {
-    let mut all_violations = Vec::new();
-    for child in &node.children {
-        let violations = check_node_with_patterns(
-            child,
-            workspace_root,
-            dir_path,
-            fs,
-            patterns_for_children,
-        )
-        .await;
-        all_violations.extend(violations);
+        let mut all_violations = Vec::new();
+        for child in &node.children {
+            let violations = check_node_with_patterns(
+                child,
+                workspace_root,
+                dir_path,
+                fs,
+                patterns_for_children,
+            )
+            .await;
+            all_violations.extend(violations);
+        }
+        all_violations
     }
-    all_violations
-    }.boxed_local()
+    .boxed_local()
 }
 
 fn check_strict<F: FileSystem>(

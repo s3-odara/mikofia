@@ -1,7 +1,7 @@
 use deno_core::v8;
 use mikofia::{AsyncRule, EvaluationContext, RuleResult};
-use std::rc::Rc;
 use std::cell::RefCell;
+use std::rc::Rc;
 
 /// Handle to a JavaScript validation rule function
 ///

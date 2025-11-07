@@ -71,8 +71,7 @@ pub fn is_glob_pattern(pattern: &str) -> bool {
     if let (Ok(parsed), Ok(literal)) = (
         GlobBuilder::new(pattern).build(),
         GlobBuilder::new(&escape(pattern)).build(),
-    )
-        && parsed.regex() != literal.regex()
+    ) && parsed.regex() != literal.regex()
     {
         return true;
     }

@@ -103,10 +103,7 @@ impl DenoRuntime {
     ///
     /// For most use cases, use `load_and_check()` instead, which handles
     /// allowed roots configuration, rule injection, and execution automatically.
-    pub async fn load_config_with_rules(
-        &mut self,
-        path: &Path,
-    ) -> ConfigWithRulesResult {
+    pub async fn load_config_with_rules(&mut self, path: &Path) -> ConfigWithRulesResult {
         // Convert path to module specifier
         let module_specifier =
             ModuleSpecifier::from_file_path(path).map_err(|_| "Invalid file path")?;
@@ -271,7 +268,8 @@ impl DenoRuntime {
 
             if !node_rules.is_empty() {
                 // Use entry API to merge rules for same path
-                rules_map.entry(full_path.clone())
+                rules_map
+                    .entry(full_path.clone())
                     .or_insert_with(Vec::new)
                     .extend(node_rules);
             }
