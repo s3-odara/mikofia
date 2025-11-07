@@ -4329,9 +4329,12 @@ dependencies = [
 name = "mikofia"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "futures",
  "globset",
  "serde",
  "serde_json",
+ "tokio",
  "walkdir",
 ]
 

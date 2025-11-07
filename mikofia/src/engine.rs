@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use futures::future::{BoxFuture, FutureExt};
+
 use crate::fs::{self, FileSystem, RealFileSystem};
 use crate::glob;
 use crate::ignore::IgnoreMatcher;
@@ -10,22 +12,26 @@ use crate::types::{
 };
 
 /// Main entry point for validation
-pub fn check(nodes: &[Node], root: &Path) -> Vec<Violation> {
-    check_with_fs(nodes, root, &RealFileSystem)
+pub async fn check(nodes: &[Node], root: &Path) -> Vec<Violation> {
+    check_with_fs(nodes, root, &RealFileSystem).await
 }
 
 /// Main entry point for validation with custom filesystem
-pub fn check_with_fs<F: FileSystem>(nodes: &[Node], root: &Path, fs: &F) -> Vec<Violation> {
-    check_with_fs_and_ignore(nodes, root, fs, &IgnoreMatcher::empty())
+pub async fn check_with_fs<F: FileSystem>(nodes: &[Node], root: &Path, fs: &F) -> Vec<Violation> {
+    check_with_fs_and_ignore(nodes, root, fs, &IgnoreMatcher::empty()).await
 }
 
 /// Main entry point for validation with ignore patterns
-pub fn check_with_ignore(nodes: &[Node], root: &Path, ignore: &IgnoreMatcher) -> Vec<Violation> {
-    check_with_fs_and_ignore(nodes, root, &RealFileSystem, ignore)
+pub async fn check_with_ignore(
+    nodes: &[Node],
+    root: &Path,
+    ignore: &IgnoreMatcher,
+) -> Vec<Violation> {
+    check_with_fs_and_ignore(nodes, root, &RealFileSystem, ignore).await
 }
 
 /// Main entry point for validation with custom filesystem and ignore patterns
-pub fn check_with_fs_and_ignore<F: FileSystem>(
+pub async fn check_with_fs_and_ignore<F: FileSystem>(
     nodes: &[Node],
     root: &Path,
     fs: &F,
@@ -34,19 +40,22 @@ pub fn check_with_fs_and_ignore<F: FileSystem>(
     // Extract global ignore patterns to pass to child nodes
     let global_patterns = ignore.patterns();
 
-    nodes
-        .iter()
-        .flat_map(|node| check_node_with_patterns(node, root, root, fs, global_patterns))
-        .collect()
+    let mut all_violations = Vec::new();
+    for node in nodes {
+        let violations = check_node_with_patterns(node, root, root, fs, global_patterns).await;
+        all_violations.extend(violations);
+    }
+    all_violations
 }
 
-fn check_node_with_patterns<F: FileSystem>(
-    node: &Node,
-    workspace_root: &Path,
-    root: &Path,
-    fs: &F,
-    parent_patterns: &[String],
-) -> Vec<Violation> {
+fn check_node_with_patterns<'a, F: FileSystem>(
+    node: &'a Node,
+    workspace_root: &'a Path,
+    root: &'a Path,
+    fs: &'a F,
+    parent_patterns: &'a [String],
+) -> BoxFuture<'a, Vec<Violation>> {
+    async move {
     // Calculate this node's relative path from workspace_root
     // This is used to prefix node-level ignore patterns
     let node_relative_path = if root == workspace_root {
@@ -104,16 +113,19 @@ fn check_node_with_patterns<F: FileSystem>(
         &combined_matcher,
         &child_patterns,
     )
+    .await
+    }.boxed()
 }
 
-fn check_node<F: FileSystem>(
-    node: &Node,
-    workspace_root: &Path,
-    root: &Path,
-    fs: &F,
-    ignore: &IgnoreMatcher,
-    patterns_for_children: &[String],
-) -> Vec<Violation> {
+fn check_node<'a, F: FileSystem>(
+    node: &'a Node,
+    workspace_root: &'a Path,
+    root: &'a Path,
+    fs: &'a F,
+    ignore: &'a IgnoreMatcher,
+    patterns_for_children: &'a [String],
+) -> BoxFuture<'a, Vec<Violation>> {
+    async move {
     // Check if path is a glob pattern
     if node.is_glob_pattern() {
         return check_glob_node(
@@ -123,7 +135,8 @@ fn check_node<F: FileSystem>(
             fs,
             ignore,
             patterns_for_children,
-        );
+        )
+        .await;
     }
 
     // Regular path checking
@@ -133,28 +146,41 @@ fn check_node<F: FileSystem>(
     let mut violations = CheckPipeline::new(node, full_path.clone(), exists)
         .check_existence()
         .check_kind(fs)
-        .check_directory_with(|n, p| {
-            check_directory_violations(n, p, workspace_root, fs, ignore, patterns_for_children)
-        })
         .violations();
+
+    // Check directory violations if it's a directory
+    if exists && fs.is_dir(&full_path) {
+        let dir_violations = check_directory_violations(
+            node,
+            &full_path,
+            workspace_root,
+            fs,
+            ignore,
+            patterns_for_children,
+        )
+        .await;
+        violations.extend(dir_violations);
+    }
 
     // Execute custom rules if the path exists
     if exists {
-        let rule_violations = execute_rules(node, &full_path, fs);
+        let rule_violations = execute_rules(node, &full_path, fs).await;
         violations.extend(rule_violations);
     }
 
     violations
+    }.boxed()
 }
 
-fn check_glob_node<F: FileSystem>(
-    node: &Node,
-    workspace_root: &Path,
-    root: &Path,
-    fs: &F,
-    ignore: &IgnoreMatcher,
-    patterns_for_children: &[String],
-) -> Vec<Violation> {
+fn check_glob_node<'a, F: FileSystem>(
+    node: &'a Node,
+    workspace_root: &'a Path,
+    root: &'a Path,
+    fs: &'a F,
+    ignore: &'a IgnoreMatcher,
+    patterns_for_children: &'a [String],
+) -> BoxFuture<'a, Vec<Violation>> {
+    async move {
     // Expand glob pattern
     let matched_paths = match glob::expand_glob(&node.path, root, fs) {
         Ok(paths) => paths,
@@ -204,68 +230,89 @@ fn check_glob_node<F: FileSystem>(
     }
 
     // Check each matched path
-    filtered_paths
-        .into_iter()
-        .flat_map(|path| {
-            let exists = fs.exists(&path);
-            let display_path = to_string_path(&path);
+    let mut all_violations = Vec::new();
+    for path in filtered_paths {
+        let exists = fs.exists(&path);
+        let display_path = to_string_path(&path);
 
-            CheckPipeline::new(node, path.clone(), exists)
-                .check_existence()
-                .check_kind(fs)
-                .check_directory_with(|n, p| {
-                    check_directory_violations(
-                        n,
-                        p,
-                        workspace_root,
-                        fs,
-                        ignore,
-                        patterns_for_children,
-                    )
-                })
-                .violations()
-                .into_iter()
-                .map(move |mut v| {
-                    v.path = display_path.clone();
-                    // Keep message as-is; it already references the pattern when relevant.
-                    v
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect()
+        let mut violations = CheckPipeline::new(node, path.clone(), exists)
+            .check_existence()
+            .check_kind(fs)
+            .violations();
+
+        // Check directory violations if it's a directory
+        if exists && fs.is_dir(&path) {
+            let dir_violations = check_directory_violations(
+                node,
+                &path,
+                workspace_root,
+                fs,
+                ignore,
+                patterns_for_children,
+            )
+            .await;
+            violations.extend(dir_violations);
+        }
+
+        // Execute custom rules if the path exists
+        if exists {
+            let rule_violations = execute_rules(node, &path, fs).await;
+            violations.extend(rule_violations);
+        }
+
+        // Update violation paths
+        for mut v in violations {
+            v.path = display_path.clone();
+            all_violations.push(v);
+        }
+    }
+
+    all_violations
+    }.boxed()
 }
 
-fn check_directory_violations<F: FileSystem>(
-    node: &Node,
-    dir_path: &Path,
-    workspace_root: &Path,
-    fs: &F,
-    ignore: &IgnoreMatcher,
-    patterns_for_children: &[String],
-) -> Vec<Violation> {
+fn check_directory_violations<'a, F: FileSystem>(
+    node: &'a Node,
+    dir_path: &'a Path,
+    workspace_root: &'a Path,
+    fs: &'a F,
+    ignore: &'a IgnoreMatcher,
+    patterns_for_children: &'a [String],
+) -> BoxFuture<'a, Vec<Violation>> {
+    async move {
     let strict_violations = check_strict(node, dir_path, workspace_root, fs, ignore);
     let children_violations =
-        check_children(node, dir_path, workspace_root, fs, patterns_for_children);
+        check_children(node, dir_path, workspace_root, fs, patterns_for_children).await;
 
     strict_violations
         .into_iter()
         .chain(children_violations)
         .collect()
+    }.boxed()
 }
 
-fn check_children<F: FileSystem>(
-    node: &Node,
-    dir_path: &Path,
-    workspace_root: &Path,
-    fs: &F,
-    patterns_for_children: &[String],
-) -> Vec<Violation> {
-    node.children
-        .iter()
-        .flat_map(|child| {
-            check_node_with_patterns(child, workspace_root, dir_path, fs, patterns_for_children)
-        })
-        .collect()
+fn check_children<'a, F: FileSystem>(
+    node: &'a Node,
+    dir_path: &'a Path,
+    workspace_root: &'a Path,
+    fs: &'a F,
+    patterns_for_children: &'a [String],
+) -> BoxFuture<'a, Vec<Violation>> {
+    async move {
+    let mut all_violations = Vec::new();
+    for child in &node.children {
+        let violations = check_node_with_patterns(
+            child,
+            workspace_root,
+            dir_path,
+            fs,
+            patterns_for_children,
+        )
+        .await;
+        all_violations.extend(violations);
+    }
+    all_violations
+    }.boxed()
 }
 
 fn check_strict<F: FileSystem>(
@@ -426,20 +473,24 @@ fn build_evaluation_context<F: FileSystem>(path: &Path, fs: &F) -> EvaluationCon
 }
 
 /// Execute custom rules on a path
-fn execute_rules<F: FileSystem>(node: &Node, path: &Path, fs: &F) -> Vec<Violation> {
+async fn execute_rules<F: FileSystem>(node: &Node, path: &Path, fs: &F) -> Vec<Violation> {
     if node.rules.is_empty() {
         return vec![];
     }
 
     let ctx = build_evaluation_context(path, fs);
 
-    node.rules
-        .iter()
-        .filter_map(|rule| match rule {
-            RuleHandle::Native(native_rule) => match native_rule.check(&ctx) {
-                RuleResult::Fail { violation } => Some(violation),
-                RuleResult::Pass | RuleResult::Skip { .. } => None,
-            },
-        })
-        .collect()
+    let mut violations = Vec::new();
+    for rule in &node.rules {
+        let result = match rule {
+            RuleHandle::Native(native_rule) => native_rule.check(&ctx),
+            RuleHandle::Async(async_rule) => async_rule.check(&ctx).await,
+        };
+
+        if let RuleResult::Fail { violation } = result {
+            violations.push(violation);
+        }
+    }
+
+    violations
 }

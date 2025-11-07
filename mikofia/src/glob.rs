@@ -111,8 +111,8 @@ pub fn is_glob_pattern(pattern: &str) -> bool {
 mod tests {
     use super::*;
     use crate::fs::mock::MockFileSystem;
-    use std::cell::Cell;
     use std::io;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
     fn expand_glob_returns_matching_paths() {
@@ -153,13 +153,13 @@ mod tests {
     }
 
     struct ErrorFs {
-        read_error_emitted: Cell<bool>,
+        read_error_emitted: AtomicBool,
     }
 
     impl ErrorFs {
         fn new() -> Self {
             Self {
-                read_error_emitted: Cell::new(false),
+                read_error_emitted: AtomicBool::new(false),
             }
         }
     }
@@ -191,7 +191,7 @@ mod tests {
         where
             F: Fn(&Path) -> bool,
         {
-            self.read_error_emitted.set(true);
+            self.read_error_emitted.store(true, Ordering::SeqCst);
             Err(io::Error::new(
                 io::ErrorKind::Other,
                 "simulated walk_dir failure",
@@ -211,7 +211,7 @@ mod tests {
             }
             other => panic!("unexpected error variant: {other:?}"),
         }
-        assert!(fs.read_error_emitted.get());
+        assert!(fs.read_error_emitted.load(Ordering::SeqCst));
     }
 
     #[test]

@@ -2,7 +2,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 /// Abstraction for filesystem operations to enable testing
-pub trait FileSystem {
+pub trait FileSystem: Sync {
     /// Check if a path exists
     fn exists(&self, path: &Path) -> bool;
 

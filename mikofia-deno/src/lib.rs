@@ -41,7 +41,7 @@ pub async fn check_with_javascript_rules(
         .map_err(|e| format!("Failed to create ignore matcher: {}", e))?;
 
     // 1. Run standard checks with ignore patterns
-    let mut violations = mikofia::check_with_ignore(&config.nodes, root, &ignore_matcher);
+    let mut violations = mikofia::check_with_ignore(&config.nodes, root, &ignore_matcher).await;
 
     // 2. Run JavaScript custom rules
     let fs = RealFileSystem;

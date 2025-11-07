@@ -197,7 +197,7 @@ pub async fn run(config: Option<PathBuf>, dir: Option<PathBuf>) -> i32 {
             };
 
             // Run standard checks
-            mikofia::check_with_ignore(&config.nodes, &check_dir, &ignore_matcher)
+            mikofia::check_with_ignore(&config.nodes, &check_dir, &ignore_matcher).await
         }
     };
 
