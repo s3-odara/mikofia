@@ -23,12 +23,49 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install system dependencies (V8 toolchain)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            clang \
+            cmake \
+            python3 \
+            python3-pip \
+            git \
+            curl \
+            pkg-config \
+            ninja-build \
+            ca-certificates
 
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
           components: clippy, rustfmt
+
+      - name: Cache rusty_v8 artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/.rusty_v8
+            target/**/gn_out/obj
+          key: ${{ runner.os }}-rusty_v8-${{ hashFiles('Cargo.lock') }}
+
+      - name: Validate cached rusty_v8 archives
+        run: |
+          set -euo pipefail
+          find target -path '*gn_out/obj/librusty_v8.a' -type f -print0 2>/dev/null | while IFS= read -r -d '' file; do
+            size=$(stat -c%s "$file")
+            if [ "$size" -lt 1048576 ]; then
+              echo "Removing suspicious $file (size ${size} bytes)"
+              rm -f "$file"
+            fi
+          done
+        shell: bash
 
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
@@ -44,3 +81,11 @@ jobs:
 
       - name: Test suite
         run: cargo test --workspace --all-targets --all-features
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          find target \( -path '*rusty_v8*/output' -o -path '*rusty_v8*/stderr' \) -type f | while read -r log; do
+            echo "===== $log ====="
+            tail -n 200 "$log"
+          done
