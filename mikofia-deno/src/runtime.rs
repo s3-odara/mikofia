@@ -4,6 +4,15 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+/// Type alias for JavaScript rule functions grouped by node path
+type RulesMap = std::collections::HashMap<String, Vec<v8::Global<v8::Function>>>;
+
+/// Type alias for the result of loading config with rules
+type ConfigWithRulesResult = Result<(Config, RulesMap), Box<dyn std::error::Error + Send + Sync>>;
+
+/// Type alias for the result of loading rules from a node
+type RulesResult = Result<RulesMap, Box<dyn std::error::Error + Send + Sync>>;
+
 /// Deno runtime wrapper for executing JavaScript/TypeScript rules
 pub struct DenoRuntime {
     js_runtime: JsRuntime,
@@ -49,15 +58,15 @@ impl DenoRuntime {
     }
 
     /// Load a TypeScript config file and return parsed Config
+    ///
+    /// # Note
+    ///
+    /// This function does NOT configure allowed filesystem roots. The caller must
+    /// call `set_allowed_roots()` before loading the config.
     pub async fn load_config(
         &mut self,
         path: &Path,
     ) -> Result<Config, Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(parent) = path.parent() {
-            self.set_allowed_roots([parent])
-                .map_err(|e| format!("Failed to configure allowed paths for config: {}", e))?;
-        }
-
         // Convert path to module specifier
         let module_specifier =
             ModuleSpecifier::from_file_path(path).map_err(|_| "Invalid file path")?;
@@ -80,21 +89,21 @@ impl DenoRuntime {
     }
 
     /// Load config with JavaScript rule functions extracted
-    pub async fn load_config_with_rules(
-        &mut self,
-        path: &Path,
-    ) -> Result<
-        (
-            Config,
-            Vec<(String, Vec<crate::rules::JavaScriptRuleHandle>)>,
-        ),
-        Box<dyn std::error::Error + Send + Sync>,
-    > {
-        if let Some(parent) = path.parent() {
-            self.set_allowed_roots([parent])
-                .map_err(|e| format!("Failed to configure allowed paths for config: {}", e))?;
-        }
-
+    ///
+    /// Returns a tuple of (Config, HashMap of rules by path).
+    /// The rules are v8::Global functions that need to be wrapped with runtime reference.
+    ///
+    /// # Note
+    ///
+    /// This function does NOT configure allowed filesystem roots. The caller must
+    /// call `set_allowed_roots()` before loading the config to ensure the config
+    /// file and any imports can be accessed.
+    ///
+    /// # Recommendation
+    ///
+    /// For most use cases, use `load_and_check()` instead, which handles
+    /// allowed roots configuration, rule injection, and execution automatically.
+    pub async fn load_config_with_rules(&mut self, path: &Path) -> ConfigWithRulesResult {
         // Convert path to module specifier
         let module_specifier =
             ModuleSpecifier::from_file_path(path).map_err(|_| "Invalid file path")?;
@@ -142,16 +151,7 @@ impl DenoRuntime {
     }
 
     /// Extract config and rule functions from module
-    fn extract_config_and_rules(
-        &mut self,
-        module_id: ModuleId,
-    ) -> Result<
-        (
-            Config,
-            Vec<(String, Vec<crate::rules::JavaScriptRuleHandle>)>,
-        ),
-        Box<dyn std::error::Error + Send + Sync>,
-    > {
+    fn extract_config_and_rules(&mut self, module_id: ModuleId) -> ConfigWithRulesResult {
         // Get the module namespace object
         let module_namespace = self.js_runtime.get_module_namespace(module_id)?;
 
@@ -193,11 +193,8 @@ impl DenoRuntime {
     fn extract_rules_from_nodes(
         scope: &mut v8::HandleScope,
         config_obj: v8::Local<v8::Value>,
-    ) -> Result<
-        Vec<(String, Vec<crate::rules::JavaScriptRuleHandle>)>,
-        Box<dyn std::error::Error + Send + Sync>,
-    > {
-        let mut rules_map = Vec::new();
+    ) -> RulesResult {
+        let mut rules_map = std::collections::HashMap::new();
 
         // Get the config object
         let config_obj: v8::Local<v8::Object> = config_obj
@@ -230,7 +227,7 @@ impl DenoRuntime {
         scope: &mut v8::HandleScope,
         node: v8::Local<v8::Value>,
         parent_path: &str,
-        rules_map: &mut Vec<(String, Vec<crate::rules::JavaScriptRuleHandle>)>,
+        rules_map: &mut std::collections::HashMap<String, Vec<v8::Global<v8::Function>>>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let node_obj: v8::Local<v8::Object> = match node.try_into() {
             Ok(obj) => obj,
@@ -252,45 +249,118 @@ impl DenoRuntime {
 
         // Extract rules from this node
         let rules_key = v8::String::new(scope, "rules").ok_or("Failed to create 'rules' string")?;
-        if let Some(rules) = node_obj.get(scope, rules_key.into()) {
-            if rules.is_array() {
-                let rules_array: v8::Local<v8::Array> = rules.try_into().unwrap();
-                let len = rules_array.length();
-                let mut node_rules = Vec::new();
+        if let Some(rules) = node_obj.get(scope, rules_key.into())
+            && rules.is_array()
+        {
+            let rules_array: v8::Local<v8::Array> = rules.try_into().unwrap();
+            let len = rules_array.length();
+            let mut node_rules = Vec::new();
 
-                for i in 0..len {
-                    if let Some(rule_fn) = rules_array.get_index(scope, i) {
-                        if rule_fn.is_function() {
-                            let func: v8::Local<v8::Function> = rule_fn.try_into().unwrap();
-                            let handle = crate::rules::JavaScriptRuleHandle::new(scope, func);
-                            node_rules.push(handle);
-                        }
-                    }
+            for i in 0..len {
+                if let Some(rule_fn) = rules_array.get_index(scope, i)
+                    && rule_fn.is_function()
+                {
+                    let func: v8::Local<v8::Function> = rule_fn.try_into().unwrap();
+                    let global_func = v8::Global::new(scope, func);
+                    node_rules.push(global_func);
                 }
+            }
 
-                if !node_rules.is_empty() {
-                    rules_map.push((full_path.clone(), node_rules));
-                }
+            if !node_rules.is_empty() {
+                // Use entry API to merge rules for same path
+                rules_map
+                    .entry(full_path.clone())
+                    .or_insert_with(Vec::new)
+                    .extend(node_rules);
             }
         }
 
         // Process children
         let children_key =
             v8::String::new(scope, "children").ok_or("Failed to create 'children' string")?;
-        if let Some(children) = node_obj.get(scope, children_key.into()) {
-            if children.is_array() {
-                let children_array: v8::Local<v8::Array> = children.try_into().unwrap();
-                let len = children_array.length();
+        if let Some(children) = node_obj.get(scope, children_key.into())
+            && children.is_array()
+        {
+            let children_array: v8::Local<v8::Array> = children.try_into().unwrap();
+            let len = children_array.length();
 
-                for i in 0..len {
-                    if let Some(child) = children_array.get_index(scope, i) {
-                        Self::extract_rules_from_node(scope, child, &full_path, rules_map)?;
-                    }
+            for i in 0..len {
+                if let Some(child) = children_array.get_index(scope, i) {
+                    Self::extract_rules_from_node(scope, child, &full_path, rules_map)?;
                 }
             }
         }
 
         Ok(())
+    }
+
+    /// Inject JavaScript rules into config nodes
+    ///
+    /// Takes the rules map returned from `load_config_with_rules` and injects
+    /// them into the corresponding nodes in the config tree
+    pub fn inject_rules_into_config(
+        config: &mut Config,
+        rules_map: std::collections::HashMap<String, Vec<v8::Global<v8::Function>>>,
+        runtime: std::rc::Rc<std::cell::RefCell<Self>>,
+    ) {
+        use std::rc::Rc;
+
+        // Create a scope to convert v8::Global functions to JavaScriptRuleHandle
+        let rule_handles: std::collections::HashMap<String, Vec<Rc<dyn mikofia::AsyncRule>>> = {
+            let mut rt = runtime.borrow_mut();
+            let scope = &mut rt.js_runtime.handle_scope();
+
+            rules_map
+                .into_iter()
+                .map(|(path, functions)| {
+                    let handles: Vec<Rc<dyn mikofia::AsyncRule>> = functions
+                        .into_iter()
+                        .map(|func| {
+                            let local_func = v8::Local::new(scope, func);
+                            let handle = crate::rules::JavaScriptRuleHandle::new(
+                                scope,
+                                local_func,
+                                runtime.clone(),
+                            );
+                            Rc::new(handle) as Rc<dyn mikofia::AsyncRule>
+                        })
+                        .collect();
+                    (path, handles)
+                })
+                .collect()
+        };
+
+        // Inject rules into nodes
+        // Note: Multiple nodes with the same path (but different ignore, etc.)
+        // will all receive the same rules, which is intentional
+        for node in &mut config.nodes {
+            Self::inject_rules_into_node(node, "", &rule_handles);
+        }
+    }
+
+    /// Recursively inject rules into a node and its children
+    fn inject_rules_into_node(
+        node: &mut mikofia::Node,
+        parent_path: &str,
+        rule_handles: &std::collections::HashMap<String, Vec<std::rc::Rc<dyn mikofia::AsyncRule>>>,
+    ) {
+        let full_path = if parent_path.is_empty() {
+            node.path.clone()
+        } else {
+            format!("{}/{}", parent_path, node.path)
+        };
+
+        // Inject rules for this node's path
+        if let Some(handles) = rule_handles.get(&full_path) {
+            for handle in handles {
+                node.rules.push(mikofia::RuleHandle::Async(handle.clone()));
+            }
+        }
+
+        // Process children recursively
+        for child in &mut node.children {
+            Self::inject_rules_into_node(child, &full_path, rule_handles);
+        }
     }
 
     /// Execute JavaScript code and return the result

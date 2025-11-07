@@ -4,6 +4,7 @@ use std::io;
 use std::path::Path;
 
 use crate::fs::{FileSystem, RealFileSystem};
+use async_trait::async_trait;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Node {
@@ -33,7 +34,7 @@ impl Node {
     /// If strict is explicitly set, use that value
     /// Otherwise, default to true if children exist, false if not
     pub fn is_strict(&self) -> bool {
-        self.strict.unwrap_or_else(|| !self.children.is_empty())
+        self.strict.unwrap_or(!self.children.is_empty())
     }
 
     /// Check whether the path uses glob syntax understood by `globset`
@@ -200,16 +201,35 @@ pub struct SiblingInfo {
     pub is_directory: bool,
 }
 
-/// Handle to a validation rule (native or JavaScript)
-#[derive(Debug, Clone)]
+/// Handle to a validation rule (native or async)
+#[derive(Clone)]
 pub enum RuleHandle {
     Native(std::sync::Arc<dyn NativeRule>),
-    // JavaScript rule handle will be added by mikofia-deno
+    Async(std::rc::Rc<dyn AsyncRule>),
 }
 
-/// Trait for native validation rules
+impl std::fmt::Debug for RuleHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RuleHandle::Native(rule) => write!(f, "RuleHandle::Native({:?})", rule),
+            RuleHandle::Async(_) => write!(f, "RuleHandle::Async(<async rule>)"),
+        }
+    }
+}
+
+/// Trait for native (synchronous) validation rules
 pub trait NativeRule: Send + Sync + std::fmt::Debug {
     fn check(&self, ctx: &EvaluationContext) -> RuleResult;
+}
+
+/// Trait for async validation rules (e.g., JavaScript rules via Deno)
+///
+/// This trait is `!Send` because JavaScript engines like V8 have strict thread
+/// affinity and must be accessed only from the thread that created them.
+/// All validation using this trait must be executed within a `tokio::task::LocalSet`.
+#[async_trait(?Send)]
+pub trait AsyncRule {
+    async fn check(&self, ctx: &EvaluationContext) -> RuleResult;
 }
 
 /// Result of a rule evaluation

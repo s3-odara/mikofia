@@ -12,8 +12,8 @@ pub use fs::{FileSystem, RealFileSystem};
 pub use ignore::IgnoreMatcher;
 pub use reporter::{ConsoleReporter, EvaluationResult, Reporter, violations_to_results};
 pub use types::{
-    Config, EvaluationContext, Existence, NativeRule, Node, NodeKind, ParentInfo, RuleHandle,
-    RuleResult, SiblingInfo, Violation,
+    AsyncRule, Config, EvaluationContext, Existence, NativeRule, Node, NodeKind, ParentInfo,
+    RuleHandle, RuleResult, SiblingInfo, Violation,
 };
 
 #[cfg(test)]
@@ -22,23 +22,23 @@ pub use fs::mock::MockFileSystem;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::Cell;
     use std::io;
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     fn mock_root() -> PathBuf {
         PathBuf::from("/project")
     }
 
-    #[test]
-    fn test_empty_nodes() {
+    #[tokio::test]
+    async fn test_empty_nodes() {
         let nodes = vec![];
-        let violations = check(&nodes, &PathBuf::from("."));
+        let violations = check(&nodes, &PathBuf::from(".")).await;
         assert!(violations.is_empty());
     }
 
-    #[test]
-    fn test_required_exists() {
+    #[tokio::test]
+    async fn test_required_exists() {
         let nodes = vec![Node {
             path: "Cargo.toml".to_string(),
             existence: Existence::Required,
@@ -48,17 +48,17 @@ mod tests {
             ignore: vec![],
             rules: vec![],
         }];
-        let violations = check(&nodes, &PathBuf::from("."));
+        let violations = check(&nodes, &PathBuf::from(".")).await;
         assert!(violations.is_empty());
     }
 
-    #[test]
-    fn test_optional_default() {
+    #[tokio::test]
+    async fn test_optional_default() {
         assert_eq!(Existence::default(), Existence::Optional);
     }
 
-    #[test]
-    fn test_mock_fs_required_file_exists() {
+    #[tokio::test]
+    async fn test_mock_fs_required_file_exists() {
         let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
         mock_fs.add_file(root.join("test.txt"), "content");
@@ -73,15 +73,15 @@ mod tests {
             rules: vec![],
         }];
 
-        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
         if !violations.is_empty() {
             eprintln!("Violations: {:?}", violations);
         }
         assert!(violations.is_empty());
     }
 
-    #[test]
-    fn test_mock_fs_required_file_missing() {
+    #[tokio::test]
+    async fn test_mock_fs_required_file_missing() {
         let mock_fs = MockFileSystem::new();
         let root = mock_root();
 
@@ -95,7 +95,7 @@ mod tests {
             rules: vec![],
         }];
 
-        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
         assert_eq!(violations.len(), 1);
         assert_eq!(
             violations[0].path,
@@ -103,8 +103,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_mock_fs_directory_with_children() {
+    #[tokio::test]
+    async fn test_mock_fs_directory_with_children() {
         let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
         mock_fs.add_dir(root.join("src"));
@@ -140,15 +140,15 @@ mod tests {
             rules: vec![],
         }];
 
-        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
         if !violations.is_empty() {
             eprintln!("Violations: {:?}", violations);
         }
         assert!(violations.is_empty());
     }
 
-    #[test]
-    fn test_node_level_ignore_scoped_to_node() {
+    #[tokio::test]
+    async fn test_node_level_ignore_scoped_to_node() {
         let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
         mock_fs.add_dir(root.join("apps"));
@@ -191,7 +191,7 @@ mod tests {
             rules: vec![],
         }];
 
-        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
         assert!(
             violations.is_empty(),
             "unexpected violations when node-level ignore should exclude dist: {:?}",
@@ -199,8 +199,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_node_level_ignore_with_globbed_directory() {
+    #[tokio::test]
+    async fn test_node_level_ignore_with_globbed_directory() {
         let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
         mock_fs.add_dir(root.join("apps"));
@@ -235,7 +235,7 @@ mod tests {
             rules: vec![],
         }];
 
-        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
         assert!(
             violations.is_empty(),
             "unexpected violations when globbed node-level ignore should exclude dist: {:?}",
@@ -243,8 +243,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_mock_fs_config_loading() {
+    #[tokio::test]
+    async fn test_mock_fs_config_loading() {
         let mut mock_fs = MockFileSystem::new();
         mock_fs.add_file(
             "config.json",
@@ -259,8 +259,8 @@ mod tests {
         assert_eq!(config.nodes[0].existence, Existence::Required);
     }
 
-    #[test]
-    fn test_is_glob_pattern_basic_wildcards() {
+    #[tokio::test]
+    async fn test_is_glob_pattern_basic_wildcards() {
         // Basic glob patterns
         let node = Node {
             path: "src/*.rs".to_string(),
@@ -296,8 +296,8 @@ mod tests {
         assert!(node.is_glob_pattern());
     }
 
-    #[test]
-    fn test_is_glob_pattern_brace_expansion() {
+    #[tokio::test]
+    async fn test_is_glob_pattern_brace_expansion() {
         // Brace expansion pattern
         let node = Node {
             path: "src/{foo,bar}.rs".to_string(),
@@ -311,8 +311,8 @@ mod tests {
         assert!(node.is_glob_pattern());
     }
 
-    #[test]
-    fn test_is_glob_pattern_negation() {
+    #[tokio::test]
+    async fn test_is_glob_pattern_negation() {
         // Negation pattern
         let node = Node {
             path: "!*.tmp".to_string(),
@@ -326,8 +326,8 @@ mod tests {
         assert!(node.is_glob_pattern());
     }
 
-    #[test]
-    fn test_is_glob_pattern_literal_paths() {
+    #[tokio::test]
+    async fn test_is_glob_pattern_literal_paths() {
         // Literal paths should not be detected as globs
         let node = Node {
             path: "src/main.rs".to_string(),
@@ -363,8 +363,8 @@ mod tests {
         assert!(!node.is_glob_pattern());
     }
 
-    #[test]
-    fn test_mock_fs_absent_violation() {
+    #[tokio::test]
+    async fn test_mock_fs_absent_violation() {
         let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
         mock_fs.add_file(root.join("temp.log"), "data");
@@ -379,14 +379,14 @@ mod tests {
             rules: vec![],
         }];
 
-        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].key, "item-must-not-exist");
         assert_eq!(violations[0].message, "Item must not exist: temp.log");
     }
 
-    #[test]
-    fn test_mock_fs_expected_directory_but_found_file() {
+    #[tokio::test]
+    async fn test_mock_fs_expected_directory_but_found_file() {
         let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
         mock_fs.add_file(root.join("config"), "{}");
@@ -401,7 +401,7 @@ mod tests {
             rules: vec![],
         }];
 
-        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].key, "expected-directory-found-file");
         assert_eq!(
@@ -410,8 +410,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_mock_fs_expected_file_but_found_directory() {
+    #[tokio::test]
+    async fn test_mock_fs_expected_file_but_found_directory() {
         let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
         mock_fs.add_dir(root.join("src"));
@@ -426,7 +426,7 @@ mod tests {
             rules: vec![],
         }];
 
-        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].key, "expected-file-found-directory");
         assert_eq!(
@@ -435,8 +435,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_mock_fs_strict_directory_allows_listed_children() {
+    #[tokio::test]
+    async fn test_mock_fs_strict_directory_allows_listed_children() {
         let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
         mock_fs.add_dir(root.join("config"));
@@ -472,12 +472,12 @@ mod tests {
             rules: vec![],
         }];
 
-        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
         assert!(violations.is_empty());
     }
 
-    #[test]
-    fn test_mock_fs_strict_directory_reports_unlisted_child() {
+    #[tokio::test]
+    async fn test_mock_fs_strict_directory_reports_unlisted_child() {
         let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
         mock_fs.add_dir(root.join("config"));
@@ -502,7 +502,7 @@ mod tests {
             rules: vec![],
         }];
 
-        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].key, "unlisted-child");
         assert_eq!(violations[0].message, "Unlisted child item: secret.toml");
@@ -514,8 +514,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_mock_fs_strict_directory_honors_nested_ignore() {
+    #[tokio::test]
+    async fn test_mock_fs_strict_directory_honors_nested_ignore() {
         let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
         mock_fs.add_dir(root.join("tmp"));
@@ -534,15 +534,15 @@ mod tests {
 
         let ignore = IgnoreMatcher::new(&vec!["tmp/cache".to_string()]).unwrap();
 
-        let violations = check_with_fs_and_ignore(&nodes, &root, &mock_fs, &ignore);
+        let violations = check_with_fs_and_ignore(&nodes, &root, &mock_fs, &ignore).await;
         assert!(
             violations.is_empty(),
             "unexpected violations when ignoring nested path: {violations:?}"
         );
     }
 
-    #[test]
-    fn test_mock_fs_strict_directory_literal_with_relative_prefix() {
+    #[tokio::test]
+    async fn test_mock_fs_strict_directory_literal_with_relative_prefix() {
         let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
         mock_fs.add_dir(root.join("config"));
@@ -571,12 +571,12 @@ mod tests {
             "./app.toml should be treated as literal for this test"
         );
 
-        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
         assert!(violations.is_empty());
     }
 
-    #[test]
-    fn test_mock_fs_strict_directory_mixed_literal_and_glob() {
+    #[tokio::test]
+    async fn test_mock_fs_strict_directory_mixed_literal_and_glob() {
         let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
         mock_fs.add_dir(root.join("config"));
@@ -613,7 +613,7 @@ mod tests {
             rules: vec![],
         }];
 
-        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].key, "unlisted-child");
         assert_eq!(violations[0].message, "Unlisted child item: app.yaml");
@@ -623,8 +623,45 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_mock_fs_glob_violation_uses_absolute_path() {
+    #[tokio::test]
+    async fn test_mock_fs_strict_directory_allows_multilevel_glob_children() {
+        let root = mock_root();
+        let mut mock_fs = MockFileSystem::new();
+        mock_fs.add_dir(root.join("src"));
+        mock_fs.add_dir(root.join("src/nested"));
+        mock_fs.add_dir(root.join("src/nested/deep"));
+        mock_fs.add_file(
+            root.join("src/nested/deep/index.ts"),
+            "export const value = 1;",
+        );
+
+        let nodes = vec![Node {
+            path: "src".to_string(),
+            existence: Existence::Required,
+            kind: NodeKind::Directory,
+            children: vec![Node {
+                path: "nested/**/*.ts".to_string(),
+                existence: Existence::Optional,
+                kind: NodeKind::File,
+                children: vec![],
+                strict: None,
+                ignore: vec![],
+                rules: vec![],
+            }],
+            strict: Some(true),
+            ignore: vec![],
+            rules: vec![],
+        }];
+
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
+        assert!(
+            violations.is_empty(),
+            "expected strict mode to allow nested/**/*.ts, violations: {violations:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mock_fs_glob_violation_uses_absolute_path() {
         let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
         mock_fs.add_dir(root.join("config"));
@@ -640,7 +677,7 @@ mod tests {
             rules: vec![],
         }];
 
-        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].key, "expected-directory-found-file");
         assert_eq!(
@@ -653,8 +690,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_mock_fs_glob_missing_uses_absolute_pattern() {
+    #[tokio::test]
+    async fn test_mock_fs_glob_missing_uses_absolute_pattern() {
         let root = mock_root();
         let mock_fs = MockFileSystem::new();
 
@@ -668,7 +705,7 @@ mod tests {
             rules: vec![],
         }];
 
-        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].key, "no-files-match-pattern");
         assert_eq!(
@@ -681,8 +718,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_optional_glob_missing_produces_no_violation() {
+    #[tokio::test]
+    async fn test_optional_glob_missing_produces_no_violation() {
         let root = mock_root();
         let mock_fs = MockFileSystem::new();
 
@@ -696,20 +733,20 @@ mod tests {
             rules: vec![],
         }];
 
-        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
         assert!(violations.is_empty());
     }
 
     struct ReadDirErrorFs {
         root: PathBuf,
-        read_dir_called: Cell<bool>,
+        read_dir_called: AtomicBool,
     }
 
     impl ReadDirErrorFs {
         fn new(root: PathBuf) -> Self {
             Self {
                 root,
-                read_dir_called: Cell::new(false),
+                read_dir_called: AtomicBool::new(false),
             }
         }
     }
@@ -725,7 +762,7 @@ mod tests {
 
         fn read_dir(&self, path: &Path) -> io::Result<Vec<String>> {
             if path == self.root.join("config") {
-                self.read_dir_called.set(true);
+                self.read_dir_called.store(true, Ordering::SeqCst);
                 Err(io::Error::new(
                     io::ErrorKind::Other,
                     "simulated read_dir failure",
@@ -750,8 +787,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_strict_directory_ignores_read_dir_errors() {
+    #[tokio::test]
+    async fn test_strict_directory_ignores_read_dir_errors() {
         let root = mock_root();
         let fs = ReadDirErrorFs::new(root.clone());
 
@@ -765,16 +802,16 @@ mod tests {
             rules: vec![],
         }];
 
-        let violations = check_with_fs(&nodes, &root, &fs);
+        let violations = check_with_fs(&nodes, &root, &fs).await;
         assert!(
             violations.is_empty(),
             "unexpected violations: {violations:?}"
         );
-        assert!(fs.read_dir_called.get());
+        assert!(fs.read_dir_called.load(Ordering::SeqCst));
     }
 
-    #[test]
-    fn test_permission_denied_directory_reports_violation() {
+    #[tokio::test]
+    async fn test_permission_denied_directory_reports_violation() {
         let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
         let protected = root.join("protected");
@@ -792,7 +829,7 @@ mod tests {
             rules: vec![],
         }];
 
-        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
         assert_eq!(violations.len(), 1, "expected single violation");
         let violation = &violations[0];
         assert_eq!(violation.key, "permission-denied");
@@ -803,8 +840,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_permission_denied_glob_reports_violation() {
+    #[tokio::test]
+    async fn test_permission_denied_glob_reports_violation() {
         let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
         let protected = root.join("logs");
@@ -822,7 +859,7 @@ mod tests {
             rules: vec![],
         }];
 
-        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
         assert_eq!(violations.len(), 1, "expected single violation");
         let violation = &violations[0];
         assert_eq!(violation.key, "permission-denied");
@@ -833,8 +870,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_node_level_ignore_scoped_to_node_directory() {
+    #[tokio::test]
+    async fn test_node_level_ignore_scoped_to_node_directory() {
         let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
 
@@ -896,7 +933,7 @@ mod tests {
             rules: vec![],
         }];
 
-        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
 
         // apps/web/dist should be ignored due to node-level ignore
         // apps/api/dist should be reported as unlisted-child
@@ -913,8 +950,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_node_level_ignore_with_glob_pattern() {
+    #[tokio::test]
+    async fn test_node_level_ignore_with_glob_pattern() {
         let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
 
@@ -962,7 +999,7 @@ mod tests {
             rules: vec![],
         }];
 
-        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
 
         // *.test.tsx files should be ignored, so no unlisted-child violations
         assert!(
@@ -971,8 +1008,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_node_level_ignore_inherits_from_parent() {
+    #[tokio::test]
+    async fn test_node_level_ignore_inherits_from_parent() {
         let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
 
@@ -1018,7 +1055,7 @@ mod tests {
             rules: vec![],
         }];
 
-        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
 
         // Both dist and utils.test.ts should be ignored
         assert!(
@@ -1027,8 +1064,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_nested_node_ignore_correctly_prefixed() {
+    #[tokio::test]
+    async fn test_nested_node_ignore_correctly_prefixed() {
         let root = mock_root();
         let mut mock_fs = MockFileSystem::new();
 
@@ -1081,7 +1118,7 @@ mod tests {
             rules: vec![],
         }];
 
-        let violations = check_with_fs(&nodes, &root, &mock_fs);
+        let violations = check_with_fs(&nodes, &root, &mock_fs).await;
 
         // packages/core/lib/temp should be ignored
         assert!(

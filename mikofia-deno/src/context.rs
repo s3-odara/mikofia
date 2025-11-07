@@ -52,8 +52,5 @@ fn create_fs_object<'s>(
 }
 
 fn io_error(message: &str) -> Box<dyn std::error::Error + Send + Sync> {
-    Box::new(std::io::Error::new(
-        std::io::ErrorKind::Other,
-        message.to_string(),
-    ))
+    Box::new(std::io::Error::other(message.to_string()))
 }

@@ -2,7 +2,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 /// Abstraction for filesystem operations to enable testing
-pub trait FileSystem {
+pub trait FileSystem: Sync {
     /// Check if a path exists
     fn exists(&self, path: &Path) -> bool;
 
@@ -81,21 +81,21 @@ impl FileSystem for RealFileSystem {
                     }
                 }
                 Err(err) => {
-                    if let Some(io_err) = err.io_error() {
-                        if io_err.kind() == io::ErrorKind::PermissionDenied {
-                            let denied_path = err
-                                .path()
-                                .map(|p| p.to_path_buf())
-                                .unwrap_or_else(|| path.to_path_buf());
+                    if let Some(io_err) = err.io_error()
+                        && io_err.kind() == io::ErrorKind::PermissionDenied
+                    {
+                        let denied_path = err
+                            .path()
+                            .map(|p| p.to_path_buf())
+                            .unwrap_or_else(|| path.to_path_buf());
 
-                            return Err(io::Error::new(
-                                io::ErrorKind::PermissionDenied,
-                                format!(
-                                    "Permission denied while accessing {}",
-                                    denied_path.display()
-                                ),
-                            ));
-                        }
+                        return Err(io::Error::new(
+                            io::ErrorKind::PermissionDenied,
+                            format!(
+                                "Permission denied while accessing {}",
+                                denied_path.display()
+                            ),
+                        ));
                     }
                 }
             }

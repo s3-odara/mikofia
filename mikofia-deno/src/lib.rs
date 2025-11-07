@@ -10,7 +10,7 @@ pub use runtime::DenoRuntime;
 pub use ts_loader::TsModuleLoader;
 
 use mikofia::Config;
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 
 /// Load a Deno-based configuration file (JavaScript or TypeScript)
 ///
@@ -20,208 +20,68 @@ pub async fn load_deno_config(
     path: &Path,
 ) -> Result<Config, Box<dyn std::error::Error + Send + Sync>> {
     let mut runtime = DenoRuntime::new()?;
+
+    // Allow access to config file's parent directory for imports
+    if let Some(parent) = path.parent() {
+        runtime
+            .set_allowed_roots([parent])
+            .map_err(|e| format!("Failed to configure allowed paths: {}", e))?;
+    }
+
     runtime.load_config(path).await
 }
 
-/// Check with JavaScript custom rules
-pub async fn check_with_javascript_rules(
-    config: Config,
+/// Load config and check with unified flow (JavaScript rules injected into config)
+///
+/// This is the recommended way to use mikofia with Deno configs.
+/// It loads the config, extracts JavaScript rules, injects them into the config nodes,
+/// and then runs the standard check flow.
+///
+/// # Thread Safety
+///
+/// This function must be called from a `tokio::task::LocalSet` because V8 requires
+/// thread affinity. The JavaScript runtime and all rules will execute on the calling thread.
+pub async fn load_and_check(
+    config_path: &Path,
     root: &Path,
-    rules_map: Vec<(String, Vec<JavaScriptRuleHandle>)>,
-    runtime: &mut DenoRuntime,
 ) -> Result<Vec<mikofia::Violation>, Box<dyn std::error::Error + Send + Sync>> {
-    use mikofia::{IgnoreMatcher, RealFileSystem};
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
+    // Create runtime
+    let mut runtime = DenoRuntime::new()?;
+
+    // Configure allowed roots: both project root AND config parent directory
+    // This allows JavaScript rules to access both project files and config-relative imports
+    let mut allowed_roots = vec![root.to_path_buf()];
+    if let Some(config_parent) = config_path.parent() {
+        let config_parent = config_parent.to_path_buf();
+        // Only add if different from root
+        if config_parent != root {
+            allowed_roots.push(config_parent);
+        }
+    }
     runtime
-        .set_allowed_roots([root])
-        .map_err(|e| format!("Failed to configure project root: {}", e))?;
+        .set_allowed_roots(allowed_roots)
+        .map_err(|e| format!("Failed to configure allowed roots: {}", e))?;
+
+    // Load config with rules (won't override allowed_roots since we set them above)
+    let (mut config, rules_map) = runtime.load_config_with_rules(config_path).await?;
+
+    // Wrap runtime in Rc<RefCell> for local sharing (enforces single-thread access)
+    let runtime_rc = Rc::new(RefCell::new(runtime));
+
+    // Inject JavaScript rules into config nodes
+    DenoRuntime::inject_rules_into_config(&mut config, rules_map, runtime_rc.clone());
 
     // Create ignore matcher from config
-    let ignore_matcher = IgnoreMatcher::new(&config.ignore)
+    let ignore_matcher = mikofia::IgnoreMatcher::new(&config.ignore)
         .map_err(|e| format!("Failed to create ignore matcher: {}", e))?;
 
-    // 1. Run standard checks with ignore patterns
-    let mut violations = mikofia::check_with_ignore(&config.nodes, root, &ignore_matcher);
-
-    // 2. Run JavaScript custom rules
-    let fs = RealFileSystem;
-
-    for (pattern, rules) in rules_map {
-        // Find matching files for this pattern
-        let matched_paths = find_matching_paths(root, &pattern, &fs)?;
-
-        // Filter out ignored paths
-        let filtered_paths: Vec<PathBuf> = matched_paths
-            .into_iter()
-            .filter(|path| {
-                path.strip_prefix(root)
-                    .ok()
-                    .map(|relative| !ignore_matcher.is_ignored(relative))
-                    .unwrap_or(true)
-            })
-            .collect();
-
-        for path in filtered_paths {
-            // Build evaluation context
-            let ctx = build_evaluation_context(&path, &fs)?;
-
-            // Execute each rule
-            for rule in &rules {
-                match runtime.call_rule(rule.function(), &ctx).await {
-                    Ok(mikofia::RuleResult::Fail { mut violation }) => {
-                        // Set the path if not already set by the rule
-                        if violation.path.is_empty() {
-                            violation.path = path.to_string_lossy().to_string();
-                        }
-                        violations.push(violation);
-                    }
-                    Ok(mikofia::RuleResult::Pass) => {}
-                    Ok(mikofia::RuleResult::Skip { .. }) => {}
-                    Err(e) => {
-                        violations.push(mikofia::Violation::new(
-                            "rule-execution-error",
-                            path.to_string_lossy().to_string(),
-                            format!("Failed to execute rule: {}", e),
-                        ));
-                    }
-                }
-            }
-        }
-    }
+    // Run unified check (includes both structure and JavaScript rules)
+    let violations = mikofia::check_with_ignore(&config.nodes, root, &ignore_matcher).await;
 
     Ok(violations)
-}
-
-/// Find files matching a pattern
-fn find_matching_paths(
-    root: &Path,
-    pattern: &str,
-    fs: &impl mikofia::FileSystem,
-) -> Result<Vec<PathBuf>, Box<dyn std::error::Error + Send + Sync>> {
-    // If pattern contains glob syntax, use glob expansion
-    if mikofia::glob::is_glob_pattern(pattern) {
-        if let Some((literal_prefix, remainder_pattern)) = split_literal_prefix(pattern) {
-            let base_dir = root.join(&literal_prefix);
-
-            if !fs.exists(&base_dir) || !fs.is_dir(&base_dir) {
-                return Ok(vec![]);
-            }
-
-            return match mikofia::glob::expand_glob(&remainder_pattern, &base_dir, fs) {
-                Ok(paths) => Ok(paths),
-                Err(_) => Ok(vec![]),
-            };
-        }
-
-        // Use mikofia's glob expansion which is already optimized
-        match mikofia::glob::expand_glob(pattern, root, fs) {
-            Ok(paths) => Ok(paths),
-            Err(_) => Ok(vec![]), // Return empty if glob expansion fails
-        }
-    } else {
-        // Literal path
-        let full_path = root.join(pattern);
-        if fs.exists(&full_path) {
-            Ok(vec![full_path])
-        } else {
-            Ok(vec![])
-        }
-    }
-}
-
-fn split_literal_prefix(pattern: &str) -> Option<(PathBuf, String)> {
-    use globset::{GlobBuilder, escape};
-
-    let mut literal_prefix = PathBuf::new();
-    let mut remainder: Vec<String> = Vec::new();
-    let mut glob_found = false;
-
-    for component in Path::new(pattern).components() {
-        let component_str = match component {
-            Component::Normal(segment) => segment.to_string_lossy().into_owned(),
-            Component::CurDir => ".".to_string(),
-            Component::ParentDir => "..".to_string(),
-            _ => return None,
-        };
-
-        let is_glob = GlobBuilder::new(&component_str)
-            .literal_separator(true)
-            .build()
-            .map(|parsed| {
-                let escaped = escape(&component_str);
-                GlobBuilder::new(&escaped)
-                    .literal_separator(true)
-                    .build()
-                    .map(|literal| parsed.regex() != literal.regex())
-                    .unwrap_or(true)
-            })
-            .unwrap_or(true);
-
-        if !glob_found && !is_glob {
-            literal_prefix.push(&component_str);
-        } else {
-            glob_found = true;
-            remainder.push(component_str);
-        }
-    }
-
-    if literal_prefix.as_os_str().is_empty() || remainder.is_empty() {
-        None
-    } else {
-        Some((literal_prefix, remainder.join("/")))
-    }
-}
-
-/// Build evaluation context for a path
-fn build_evaluation_context(
-    path: &Path,
-    fs: &impl mikofia::FileSystem,
-) -> Result<mikofia::EvaluationContext, Box<dyn std::error::Error + Send + Sync>> {
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("")
-        .to_string();
-
-    let extension = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|s| s.to_string());
-
-    let parent = path.parent().and_then(|parent_path| {
-        parent_path.file_name().and_then(|parent_name| {
-            parent_name.to_str().map(|name_str| mikofia::ParentInfo {
-                path: parent_path.to_string_lossy().to_string(),
-                name: name_str.to_string(),
-            })
-        })
-    });
-
-    let siblings = if let Some(parent_path) = path.parent() {
-        fs.read_dir(parent_path)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|sibling_name| sibling_name != &name)
-            .map(|sibling_name| {
-                let sibling_path = parent_path.join(&sibling_name);
-                mikofia::SiblingInfo {
-                    name: sibling_name,
-                    is_file: !fs.is_dir(&sibling_path),
-                    is_directory: fs.is_dir(&sibling_path),
-                }
-            })
-            .collect()
-    } else {
-        vec![]
-    };
-
-    Ok(mikofia::EvaluationContext {
-        path: path.to_string_lossy().to_string(),
-        name,
-        extension,
-        parent,
-        siblings,
-    })
 }
 
 #[cfg(test)]
@@ -380,7 +240,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_check_with_javascript_rules_applies_custom_rule() {
+    async fn test_custom_rules_applied_through_unified_flow() {
         let temp_dir = TempDir::new().unwrap();
         let root = temp_dir.path();
 
@@ -418,12 +278,7 @@ mod tests {
         let bad_file = src_dir.join("bad_file.ts");
         fs::write(&bad_file, "// demo").unwrap();
 
-        let mut runtime = DenoRuntime::new().unwrap();
-        let (config, rules_map) = runtime.load_config_with_rules(&config_path).await.unwrap();
-
-        let violations = check_with_javascript_rules(config, root, rules_map, &mut runtime)
-            .await
-            .unwrap();
+        let violations = load_and_check(&config_path, root).await.unwrap();
 
         assert_eq!(violations.len(), 1);
         let violation = &violations[0];
@@ -479,12 +334,7 @@ mod tests {
         fs::create_dir_all(&src_dir).unwrap();
         fs::write(src_dir.join("file.txt"), "hello\n").unwrap();
 
-        let mut runtime = DenoRuntime::new().unwrap();
-        let (config, rules_map) = runtime.load_config_with_rules(&config_path).await.unwrap();
-
-        let violations = check_with_javascript_rules(config, root, rules_map, &mut runtime)
-            .await
-            .unwrap();
+        let violations = load_and_check(&config_path, root).await.unwrap();
 
         assert!(
             violations.is_empty(),
@@ -523,16 +373,11 @@ mod tests {
         fs::create_dir_all(&src_dir).unwrap();
         fs::write(src_dir.join("file.txt"), "hello\n").unwrap();
 
-        let mut runtime = DenoRuntime::new().unwrap();
-        let (config, rules_map) = runtime.load_config_with_rules(&config_path).await.unwrap();
-
-        let violations = check_with_javascript_rules(config, root, rules_map, &mut runtime)
-            .await
-            .unwrap();
+        let violations = load_and_check(&config_path, root).await.unwrap();
 
         assert_eq!(violations.len(), 1);
         let violation = &violations[0];
-        assert_eq!(violation.key, "rule-execution-error");
+        assert_eq!(violation.key, "js-rule-error");
         assert!(
             violation
                 .message
@@ -633,12 +478,7 @@ mod tests {
         let test_file = src_dir.join("test_file.ts");
         fs::write(&test_file, "// demo").unwrap();
 
-        let mut runtime = DenoRuntime::new().unwrap();
-        let (config, rules_map) = runtime.load_config_with_rules(&config_path).await.unwrap();
-
-        let violations = check_with_javascript_rules(config, root, rules_map, &mut runtime)
-            .await
-            .unwrap();
+        let violations = load_and_check(&config_path, root).await.unwrap();
 
         assert_eq!(violations.len(), 1);
         let violation = &violations[0];

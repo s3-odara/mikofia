@@ -4329,9 +4329,12 @@ dependencies = [
 name = "mikofia"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "futures",
  "globset",
  "serde",
  "serde_json",
+ "tokio",
  "walkdir",
 ]
 
@@ -4344,6 +4347,7 @@ dependencies = [
  "mikofia",
  "mikofia-deno",
  "predicates",
+ "serde_json",
  "tempfile",
  "tokio",
 ]
@@ -4353,6 +4357,7 @@ name = "mikofia-deno"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "deno_ast",
  "deno_core",
  "deno_runtime",

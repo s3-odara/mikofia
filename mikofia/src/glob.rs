@@ -68,26 +68,50 @@ pub fn expand_glob<F: FileSystem>(
 
 /// Determine whether a pattern contains glob syntax recognized by `globset`.
 pub fn is_glob_pattern(pattern: &str) -> bool {
-    let parsed = match GlobBuilder::new(pattern).build() {
-        Ok(glob) => glob,
-        Err(_) => return false,
-    };
+    if let (Ok(parsed), Ok(literal)) = (
+        GlobBuilder::new(pattern).build(),
+        GlobBuilder::new(&escape(pattern)).build(),
+    ) && parsed.regex() != literal.regex()
+    {
+        return true;
+    }
 
-    let literal_pattern = escape(pattern);
-    let literal = match GlobBuilder::new(&literal_pattern).build() {
-        Ok(glob) => glob,
-        Err(_) => return false,
-    };
+    if pattern.len() > 1 && pattern.starts_with('!') {
+        return true;
+    }
 
-    parsed.regex() != literal.regex()
+    let mut chars = pattern.chars().peekable();
+    let mut escaped = false;
+
+    while let Some(ch) = chars.next() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+
+        match ch {
+            '\\' => {
+                escaped = true;
+            }
+            '*' | '?' | '[' | '{' => return true,
+            '!' | '@' | '+' => {
+                if chars.peek() == Some(&'(') {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    false
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::fs::mock::MockFileSystem;
-    use std::cell::Cell;
     use std::io;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
     fn expand_glob_returns_matching_paths() {
@@ -128,13 +152,13 @@ mod tests {
     }
 
     struct ErrorFs {
-        read_error_emitted: Cell<bool>,
+        read_error_emitted: AtomicBool,
     }
 
     impl ErrorFs {
         fn new() -> Self {
             Self {
-                read_error_emitted: Cell::new(false),
+                read_error_emitted: AtomicBool::new(false),
             }
         }
     }
@@ -166,7 +190,7 @@ mod tests {
         where
             F: Fn(&Path) -> bool,
         {
-            self.read_error_emitted.set(true);
+            self.read_error_emitted.store(true, Ordering::SeqCst);
             Err(io::Error::new(
                 io::ErrorKind::Other,
                 "simulated walk_dir failure",
@@ -186,7 +210,7 @@ mod tests {
             }
             other => panic!("unexpected error variant: {other:?}"),
         }
-        assert!(fs.read_error_emitted.get());
+        assert!(fs.read_error_emitted.load(Ordering::SeqCst));
     }
 
     #[test]
@@ -209,6 +233,7 @@ mod tests {
         assert!(is_glob_pattern("*.rs"));
         assert!(is_glob_pattern("src/**/mod.rs"));
         assert!(is_glob_pattern("{foo,bar}.txt"));
+        assert!(is_glob_pattern("src/*.{ts,tsx}"));
     }
 
     #[test]
@@ -216,6 +241,11 @@ mod tests {
         assert!(!is_glob_pattern("src/main.rs"));
         assert!(!is_glob_pattern("node_modules"));
         assert!(!is_glob_pattern("foo\u{2603}.txt"));
+    }
+
+    #[test]
+    fn detects_extglob_with_negation_group() {
+        assert!(is_glob_pattern("!(*.spec).ts"));
     }
 }
 

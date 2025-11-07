@@ -1,5 +1,5 @@
 use std::marker::PhantomData;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::fs::FileSystem;
 use crate::types::{Existence, Node, NodeKind, Violation};
@@ -128,19 +128,5 @@ impl<'a> CheckPipeline<'a, KindChecked> {
     /// Extract final violations from the pipeline
     pub(crate) fn violations(self) -> Vec<Violation> {
         self.violations
-    }
-
-    /// Run additional directory-specific checks when prior stages passed
-    pub(crate) fn check_directory_with<F>(mut self, f: F) -> Self
-    where
-        F: FnOnce(&Node, &Path) -> Vec<Violation>,
-    {
-        if !self.should_continue {
-            return self;
-        }
-
-        let new_violations = f(self.node, &self.path);
-        self.violations.extend(new_violations);
-        self
     }
 }

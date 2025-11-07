@@ -66,14 +66,13 @@ impl AllowedPaths {
                 }
             }
             Err(err) if err.kind() == io::ErrorKind::NotFound && allow_nonexistent => {
-                if let Some(existing_ancestor) = self.find_existing_ancestor(path)? {
-                    if self
+                if let Some(existing_ancestor) = self.find_existing_ancestor(path)?
+                    && self
                         .roots
                         .iter()
                         .any(|root| existing_ancestor.starts_with(root))
-                    {
-                        return Ok(());
-                    }
+                {
+                    return Ok(());
                 }
                 Err(permission_error(path))
             }
