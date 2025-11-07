@@ -20,6 +20,8 @@ jobs:
     permissions:
       contents: read
       actions: write
+    env:
+      V8_FROM_SOURCE: "1"
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -46,26 +48,6 @@ jobs:
         with:
           toolchain: stable
           components: clippy, rustfmt
-
-      - name: Cache rusty_v8 artifacts
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/.rusty_v8
-            target/**/gn_out/obj
-          key: ${{ runner.os }}-rusty_v8-${{ hashFiles('Cargo.lock') }}
-
-      - name: Validate cached rusty_v8 archives
-        run: |
-          set -euo pipefail
-          find target -path '*gn_out/obj/librusty_v8.a' -type f -print0 2>/dev/null | while IFS= read -r -d '' file; do
-            size=$(stat -c%s "$file")
-            if [ "$size" -lt 1048576 ]; then
-              echo "Removing suspicious $file (size ${size} bytes)"
-              rm -f "$file"
-            fi
-          done
-        shell: bash
 
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
