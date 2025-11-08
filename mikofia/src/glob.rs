@@ -106,6 +106,11 @@ pub fn is_glob_pattern(pattern: &str) -> bool {
     false
 }
 
+/// Build a glob pattern that treats path separators literally (similar to minimatch).
+pub fn build_literal_glob(pattern: &str) -> Result<Glob, globset::Error> {
+    GlobBuilder::new(pattern).literal_separator(true).build()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,17 +178,11 @@ mod tests {
         }
 
         fn read_dir(&self, _path: &Path) -> io::Result<Vec<String>> {
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                "read_dir should not be called",
-            ))
+            Err(io::Error::other("read_dir should not be called"))
         }
 
         fn read_to_string(&self, _path: &Path) -> io::Result<String> {
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                "read_to_string should not be called",
-            ))
+            Err(io::Error::other("read_to_string should not be called"))
         }
 
         fn walk_dir<F>(&self, _path: &Path, _predicate: F) -> io::Result<Vec<PathBuf>>
@@ -191,10 +190,7 @@ mod tests {
             F: Fn(&Path) -> bool,
         {
             self.read_error_emitted.store(true, Ordering::SeqCst);
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                "simulated walk_dir failure",
-            ))
+            Err(io::Error::other("simulated walk_dir failure"))
         }
     }
 
@@ -247,9 +243,4 @@ mod tests {
     fn detects_extglob_with_negation_group() {
         assert!(is_glob_pattern("!(*.spec).ts"));
     }
-}
-
-/// Build a glob pattern that treats path separators literally (similar to minimatch).
-pub fn build_literal_glob(pattern: &str) -> Result<Glob, globset::Error> {
-    GlobBuilder::new(pattern).literal_separator(true).build()
 }

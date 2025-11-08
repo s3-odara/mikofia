@@ -69,7 +69,7 @@ pub async fn load_and_check(
     let (mut config, rules_map) = runtime.load_config_with_rules(config_path).await?;
 
     // Wrap runtime in Rc<RefCell> for local sharing (enforces single-thread access)
-    let runtime_rc = Rc::new(RefCell::new(runtime));
+    let runtime_rc = Rc::new(RefCell::new(Some(runtime)));
 
     // Inject JavaScript rules into config nodes
     DenoRuntime::inject_rules_into_config(&mut config, rules_map, runtime_rc.clone());
@@ -104,7 +104,7 @@ pub async fn check_from_config_path(
     let extension = config_path
         .extension()
         .and_then(|s| s.to_str())
-        .ok_or_else(|| "Config file has no extension")?;
+        .ok_or("Config file has no extension")?;
 
     let is_deno = ["js", "ts"]
         .iter()

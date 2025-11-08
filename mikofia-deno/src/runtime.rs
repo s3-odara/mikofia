@@ -270,7 +270,7 @@ impl DenoRuntime {
                 // Use entry API to merge rules for same path
                 rules_map
                     .entry(full_path.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .extend(node_rules);
             }
         }
@@ -301,14 +301,17 @@ impl DenoRuntime {
     pub fn inject_rules_into_config(
         config: &mut Config,
         rules_map: std::collections::HashMap<String, Vec<v8::Global<v8::Function>>>,
-        runtime: std::rc::Rc<std::cell::RefCell<Self>>,
+        runtime: std::rc::Rc<std::cell::RefCell<Option<Self>>>,
     ) {
         use std::rc::Rc;
 
         // Create a scope to convert v8::Global functions to JavaScriptRuleHandle
         let rule_handles: std::collections::HashMap<String, Vec<Rc<dyn mikofia::AsyncRule>>> = {
-            let mut rt = runtime.borrow_mut();
-            let scope = &mut rt.js_runtime.handle_scope();
+            let mut rt_slot = runtime.borrow_mut();
+            let runtime_ref = rt_slot
+                .as_mut()
+                .expect("Deno runtime unavailable while injecting rules");
+            let scope = &mut runtime_ref.js_runtime.handle_scope();
 
             rules_map
                 .into_iter()

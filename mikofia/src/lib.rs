@@ -532,7 +532,7 @@ mod tests {
             rules: vec![],
         }];
 
-        let ignore = IgnoreMatcher::new(&vec!["tmp/cache".to_string()]).unwrap();
+        let ignore = IgnoreMatcher::new(&["tmp/cache".to_string()]).unwrap();
 
         let violations = check_with_fs_and_ignore(&nodes, &root, &mock_fs, &ignore).await;
         assert!(
@@ -763,10 +763,7 @@ mod tests {
         fn read_dir(&self, path: &Path) -> io::Result<Vec<String>> {
             if path == self.root.join("config") {
                 self.read_dir_called.store(true, Ordering::SeqCst);
-                Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "simulated read_dir failure",
-                ))
+                Err(io::Error::other("simulated read_dir failure"))
             } else {
                 Err(io::Error::new(io::ErrorKind::NotFound, "not found"))
             }
