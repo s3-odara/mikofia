@@ -21,7 +21,9 @@ jobs:
       contents: read
       actions: write
     env:
-      V8_FROM_SOURCE: "1"
+      RUST_BACKTRACE: "1"
+      # V8_FROM_SOURCE removed to use prebuilt binaries for faster builds
+      # If prebuilt download fails, consider enabling sccache below
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -51,6 +53,33 @@ jobs:
           toolchain: stable
           components: clippy, rustfmt
 
+      - name: Install sccache
+        id: setup-sccache
+        run: |
+          cargo install sccache --locked || true
+          if command -v sccache >/dev/null 2>&1; then
+            echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+            echo "SCCACHE_DIR=${{ github.workspace }}/target/sccache" >> $GITHUB_ENV
+            echo "available=true" >> $GITHUB_OUTPUT
+            echo "✓ sccache installed and configured"
+          else
+            echo "available=false" >> $GITHUB_OUTPUT
+            echo "⚠ sccache installation failed, continuing without compilation cache"
+          fi
+
+      - name: Cache sccache artifacts
+        if: steps.setup-sccache.outputs.available == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            target/sccache
+            target/*/.*
+            target/*/build
+            target/*/deps
+          key: sccache-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            sccache-${{ runner.os }}-
+
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
         with:
@@ -66,10 +95,42 @@ jobs:
       - name: Test suite
         run: cargo test --workspace --all-targets --all-features
 
+      - name: Show sccache statistics
+        if: always() && steps.setup-sccache.outputs.available == 'true'
+        run: sccache --show-stats || echo "sccache stats unavailable"
+
       - name: Collect logs on failure
         if: failure()
         run: |
-          find target \( -path '*rusty_v8*/output' -o -path '*rusty_v8*/stderr' \) -type f | while read -r log; do
-            echo "===== $log ====="
-            tail -n 200 "$log"
-          done
+          set -euo pipefail
+          echo "===== Environment Info ====="
+          echo "Target: $(rustc -vV | grep host | cut -d' ' -f2)"
+          echo "Cargo version: $(cargo --version)"
+          echo "Rust version: $(rustc --version)"
+          echo ""
+          echo "===== V8 Build Logs ====="
+          if [ -d target ]; then
+            log_files=$(find target \( -path '*rusty_v8*/output' -o -path '*rusty_v8*/stderr' -o -path '*v8*/output' -o -path '*v8*/stderr' \) -type f 2>/dev/null)
+            if [ -n "$log_files" ]; then
+              echo "$log_files" | while read -r log; do
+                echo "===== $log ====="
+                tail -n 200 "$log"
+              done
+            else
+              echo "No V8 build log files found"
+            fi
+          else
+            echo "target directory not created; skipping V8 build logs"
+          fi
+          echo ""
+          echo "===== Build Directory Contents ====="
+          if [ -d target ]; then
+            v8_libs=$(find target \( -name "*.a" -o -name "librusty_v8.a" -o -name "libv8.a" \) 2>/dev/null)
+            if [ -n "$v8_libs" ]; then
+              echo "$v8_libs"
+            else
+              echo "No V8 static libraries found"
+            fi
+          else
+            echo "target directory not created; skipping V8 library listing"
+          fi
