@@ -25,6 +25,7 @@ jobs:
     permissions:
       contents: read
       actions: write
+      packages: read
     env:
       RUST_BACKTRACE: "1"
       # V8_FROM_SOURCE removed to use prebuilt binaries for faster builds
