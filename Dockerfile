@@ -26,6 +26,7 @@ RUN apt-get update && \
 
 RUN rustup component add clippy rustfmt
 
-RUN cargo install sccache --locked
+RUN cargo install sccache --locked && \
+    rm -rf ~/.cargo/registry/index/* ~/.cargo/registry/cache/* ~/.cargo/git/db/*
 
 WORKDIR /app
