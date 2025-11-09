@@ -18,7 +18,8 @@ RUN apt-get update && \
       git \
       curl \
       ninja-build \
-      libssl-dev\
+      libssl-dev \
+      zstd \
       ca-certificates && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
