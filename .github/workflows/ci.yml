@@ -17,9 +17,15 @@ env:
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository }}/ci-builder:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     permissions:
       contents: read
       actions: write
+      packages: read
     env:
       RUST_BACKTRACE: "1"
       # V8_FROM_SOURCE removed to use prebuilt binaries for faster builds
@@ -30,55 +36,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install system dependencies (V8 toolchain)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            pkg-config \
-            libglib2.0-dev \
-            libgtk-3-dev \
-            clang \
-            cmake \
-            python3 \
-            python3-pip \
-            git \
-            curl \
-            ninja-build \
-            ca-certificates
-
-      - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
-          components: clippy, rustfmt
-
-      - name: Install sccache
+      - name: Configure sccache
         id: setup-sccache
         run: |
-          cargo install sccache --locked || true
           if command -v sccache >/dev/null 2>&1; then
             echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
             echo "SCCACHE_DIR=${{ github.workspace }}/target/sccache" >> $GITHUB_ENV
             echo "available=true" >> $GITHUB_OUTPUT
-            echo "✓ sccache installed and configured"
+            echo "✓ sccache is available and configured"
           else
             echo "available=false" >> $GITHUB_OUTPUT
-            echo "⚠ sccache installation failed, continuing without compilation cache"
+            echo "⚠ sccache not found in container, continuing without compilation cache"
           fi
-
-      - name: Cache sccache artifacts
-        if: steps.setup-sccache.outputs.available == 'true'
-        uses: actions/cache@v4
-        with:
-          path: |
-            target/sccache
-            target/*/.*
-            target/*/build
-            target/*/deps
-          key: sccache-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            sccache-${{ runner.os }}-
 
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
