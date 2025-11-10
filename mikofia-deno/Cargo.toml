@@ -7,7 +7,7 @@ license.workspace = true
 [dependencies]
 async-trait = "0.1"
 deno_core = "0.350"
-deno_runtime = "0.215"
+deno_runtime = "0.218"
 deno_ast = { version = "=0.51.0", features = ["transpiling"] }
 globset = "0.4"
 tokio = { version = "1", features = ["full"] }
