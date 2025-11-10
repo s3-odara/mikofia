@@ -14,8 +14,8 @@ pub(crate) struct AllowedPaths {
 
 impl AllowedPaths {
     fn new() -> Self {
-        let mut rng = rand::thread_rng();
-        let random: u128 = rand::Rng::r#gen(&mut rng);
+        let mut rng = rand::rng();
+        let random: u128 = rand::Rng::random(&mut rng);
         let token = format!("{:032x}", random);
         Self {
             roots: Vec::new(),
