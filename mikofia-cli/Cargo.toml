@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-clap = { version = "4.5.50", features = ["derive"] }
+clap = { version = "4.5.51", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 mikofia = { path = "../mikofia" }
 mikofia-deno = { path = "../mikofia-deno" }
